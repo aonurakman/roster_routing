@@ -7,10 +7,12 @@ class Traveler:
     def __init__(self, agent_id, connections, pref_av, alpha, wom_coef, inertia, tau, initial_tt_h, initial_tt_av):
         assert 0 <= alpha <= 1
         assert tau > 0
-        assert 0 <= wom_coef <= 1
+        assert wom_coef >= 0
         assert inertia >= 0
         assert all(w >= 0 for w in connections.values())
         assert not connections or np.isclose(sum(connections.values()), 1.0)
+        assert initial_tt_h > 0 and initial_tt_av > 0
+        self.rng = np.random.default_rng(seed=agent_id)
         self.id = agent_id
         self.pref_av = pref_av
         self.alpha = alpha
@@ -28,10 +30,8 @@ class Traveler:
         u_av = self.get_utility(1)
 
         p_av = expit((u_av - u_h) / self.tau)
-        choice = int(np.random.random() < p_av)
+        choice = int(self.rng.random() < p_av)
         self.last_choice = choice
-        if not self.tried_av and choice == 1:
-            self.tried_av = True
         return choice
         
     def get_utility(self, mode: int) -> float:
@@ -44,12 +44,14 @@ class Traveler:
         
     def learn(self, travel_time: float) -> None:
         self.cost[self.last_choice] = (1 - self.alpha) * self.cost[self.last_choice] + self.alpha * travel_time
+        if not self.tried_av and self.last_choice == 1:
+            self.tried_av = True
     
     def digest_wom(self, woms: dict) -> None:
         if not self.connections: return
         self.wom_signal = 0.0
         for agent_id in self.connections:
-            self.wom_signal += self.connections[agent_id] * woms[agent_id]
+            self.wom_signal += self.connections[agent_id] * woms.get(agent_id, 0.0)
     
     def emit_wom(self) -> float:
         if self.tried_av:
