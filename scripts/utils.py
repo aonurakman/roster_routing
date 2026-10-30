@@ -6,23 +6,72 @@ import sys
 import xml.etree.ElementTree as ET
 from typing import Optional
 
+from legacy.scripts.baselines_clusters import ALGORITHM
 
-def add_model_snapshot_argument(parser: argparse.ArgumentParser) -> None:
-    """Add the common optional policy-snapshot argument to an experiment script."""
 
-    def positive_int(value: str) -> int:
-        parsed = int(value)
-        if parsed <= 0:
-            raise argparse.ArgumentTypeError("must be a positive integer")
-        return parsed
+def add_arguments() -> argparse.ArgumentParser:
+    # what is the best way of assigning each of these to a variable?
+    # answer: use the argparse module to parse command line arguments and assign them to variables
+    # show example
+    # example: my_variable = args.my_variable
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--id', type=str, required=True)
+    parser.add_argument('--project', type=str, default=None)
+    parser.add_argument('--env-conf', type=str, default="clusters")
+    parser.add_argument('--task-conf', type=str, required=True)
+    parser.add_argument('--alg-conf', type=str, required=True)
+    parser.add_argument('--net', type=str, required=True)
+    parser.add_argument('--env-seed', type=int, default=42)
+    parser.add_argument('--torch-seed', type=int, default=42)
+    parser.add_argument('--route-set', type=str, default=None)
+    parser.add_argument("--shuffle", action="store_true", default=False)
+    parser.add_argument('--skip-metrics', action='store_true', default=False)
+    parser.add_argument("--save-model-every", type=int, default=None)
+    return parser
+    
+    
+def declare_setup(args: argparse.Namespace, alg: str) -> None:
+    print("### STARTING EXPERIMENT ###")
+    print(f"Algorithm: {alg.upper()}")
+    print(f"Experiment ID: {args.id}")
+    print(f"Network: {args.net}")
+    print(f"Environment seed: {args.env_seed}")
+    print(f"Algorithm config: {args.alg_conf}")
+    print(f"Environment config: {args.env_conf}")
+    print(f"Task config: {args.task_conf}")
+    print(f"Requested route set: {args.route_set or 'network default'}")
+    print(f"Shuffle: {args.shuffle}")
+    print(f"Metrics will {'NOT ' if args.skip_metrics else ''}be computed after the experiment.\n")
+    
 
-    parser.add_argument(
-        "--save-model-every",
-        type=positive_int,
-        default=None,
-        metavar="N",
-        help="Save policy snapshots every N AV-training episodes and at the final episode.",
-    )
+def configure(env_seed: int, torch_seed: int) -> None:
+    os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
+    logging.getLogger("matplotlib").setLevel(logging.ERROR)
+    torch.manual_seed(torch_seed)
+    torch.cuda.manual_seed(torch_seed)
+    torch.cuda.manual_seed_all(torch_seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    random.seed(env_seed)
+    np.random.seed(env_seed)
+    
+def get_device(declare: bool = True) -> torch.device:
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        print(f"Using GPU: {torch.cuda.get_device_name(device)}")
+    else:
+        device = torch.device("cpu")
+        print("Using CPU")
+    if declare:
+        print(f"Device: {device}")
+    return device
+    
+def read_parameters(args: argparse.Namespace) -> dict:
+    params = dict()
+    params.update(json.load(open(f"../config/algo_config/{ALGORITHM}/{args.alg_conf}.json")))
+    params.update(json.load(open(f"../config/env_config/{args.env_conf}.json")))
+    params.update(json.load(open(f"../config/task_config/{args.task_conf}.json")))
+    return params
 
 
 def should_save_model_snapshot(
@@ -77,14 +126,6 @@ class CSVLossLogger:
         # Development note: instead of manual closing, context manager may be added to handle file opening/closing safely using 'with open(...)'
         self.file.close()
 
-
-
-
-
-
-import torch
-import torch.nn as nn
-
 def get_episodes(ep_path: str) -> list[int]:
     """Get the episodes data
 
@@ -101,7 +142,6 @@ def get_episodes(ep_path: str) -> list[int]:
             eps.append(episode)
     else:
         raise FileNotFoundError(f"Episodes folder does not exist!")
-
 
     return sorted(eps)
 
@@ -217,48 +257,6 @@ def save_loss_records(records_folder: str, loss_records: list[dict], columns: li
             writer.writerow({column: row.get(column, "") for column in columns})
 
     return os.path.abspath(loss_csv_path)
-
-
-class AppendODEmbedding(nn.Module):
-    """
-    Append a learned OD embedding to each agent observation.
-
-    The OD ids are fixed for a given experiment and must follow the same order as
-    the TorchRL group of machine agents.
-    """
-
-    def __init__(self, od_ids: list[int], num_od_pairs: int, embedding_dim: int):
-        super().__init__()
-        self.embedding = nn.Embedding(num_od_pairs, embedding_dim)
-        self.register_buffer("od_ids", torch.as_tensor(od_ids, dtype=torch.long))
-
-    def forward(self, observation: torch.Tensor) -> torch.Tensor:
-        # observation has shape [..., n_agents, obs_dim]
-        batch_shape = observation.shape[:-2]
-        od_ids = self.od_ids
-
-        if batch_shape:
-            od_ids = od_ids.view(*([1] * len(batch_shape)), *od_ids.shape)
-            od_ids = od_ids.expand(*batch_shape, *self.od_ids.shape)
-
-        od_embedding = self.embedding(od_ids)
-        return torch.cat([observation, od_embedding], dim=-1)
-
-
-def get_od_ids_for_group(group_agent_ids: list[str], machine_agents: list, num_destinations: int) -> list[int]:
-    """
-    Build OD ids in the exact order used by the TorchRL group.
-
-    Each OD pair is mapped to one integer:
-        od_id = origin * num_destinations + destination
-    """
-
-    machine_by_id = {str(machine.id): machine for machine in machine_agents}
-    od_ids = []
-    for agent_id in group_agent_ids:
-        machine = machine_by_id[agent_id]
-        od_ids.append(int(machine.origin) * num_destinations + int(machine.destination))
-    return od_ids
 
 
 def script_path_for_config(script_file: str, repo_root: Optional[str] = None) -> str:

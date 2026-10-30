@@ -1,6 +1,8 @@
 import os
 import sys
 
+from components.social_connections import generate_social_network
+
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if repo_root not in sys.path:
@@ -15,189 +17,50 @@ import random
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
-import torch.optim as optim
 
 from routerl         import TrafficEnvironment
+from routerl         import Keychain as kc
+from routerl         import MachineAgent, HumanAgent
 from tqdm            import tqdm
+from numpy.random    import normal
 
-from baseline_models import BaseLearningModel
-from iql             import Network
-from utils           import clear_SUMO_files
-from utils           import add_model_snapshot_argument
-from utils           import model_snapshot_path
-from utils           import print_agent_counts
-from utils           import run_metrics_analysis
-from utils           import save_loss_records
-from utils           import script_path_for_config
-from utils           import should_save_model_snapshot
+from learners        import PPO
+from utils           import *
 
-### A simplified single-step actor-only PPO implementation for single-step decisions.
-class PPO(BaseLearningModel):
-    def __init__(self, state_size, action_space_size,
-                 device="cpu", batch_size=16, lr=0.003, num_epochs=4, 
-                 num_hidden=2, widths=[32, 64, 32], clip_eps=0.2, 
-                 normalize_advantage=True, entropy_coef=0.3):
-        super().__init__()
-        self.device = device
-        self.action_space_size = action_space_size
-        self.batch_size = batch_size
-        self.num_epochs = num_epochs
-        self.clip_eps = clip_eps
-        self.normalize_advantage = normalize_advantage
-        self.entropy_coef = entropy_coef
+from mode_choice      import Traveler
+from components import ClusteredRoutesLoader, resolve_route_set
 
-        self.policy_net = Network(state_size, action_space_size, num_hidden, widths).to(self.device)
-        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
-        self.softmax = nn.Softmax(dim=-1)
-        
-        self.loss = list()
-        self.memory = list()
-        self.deterministic = False
 
-    def act(self, state):
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            logits = self.policy_net(state_tensor)
-            #logits = torch.clamp(logits, -10, 10)
-            #logits = (logits - logits.min()) / (logits.max() - logits.min())
-            #self.logits = logits
-            probs = self.softmax(logits)
-        dist = torch.distributions.Categorical(probs)
-        if not self.deterministic: action = dist.sample().item()
-        else: action = torch.argmax(probs).item()
-        self.last_state = state
-        self.last_action = action
-        self.last_log_prob = dist.log_prob(torch.tensor(action)).item()
-        return action
-
-    def push(self, reward):
-        self.memory.append((self.last_state, self.last_action, self.last_log_prob, reward))
-        del self.last_state, self.last_action, self.last_log_prob
-
-    def learn(self):
-        if len(self.memory) < self.batch_size: return
-        step_loss = list()
-
-        for _ in range(self.num_epochs):
-            batch = random.sample(self.memory, self.batch_size)
-            states, actions, old_log_probs, rewards = zip(*batch)
-            states_tensor = torch.FloatTensor(states).to(self.device)
-            actions_tensor = torch.LongTensor(actions).to(self.device)
-            old_log_probs_tensor = torch.FloatTensor(old_log_probs).to(self.device)
-            rewards_tensor = torch.FloatTensor(rewards).to(self.device)
-            # print(f"""
-            # States: {states_tensor}, Actions: {actions_tensor},
-            # Old Log Probs: {old_log_probs_tensor}, Rewards: {rewards_tensor}
-            #       """)
-
-            logits = self.policy_net(states_tensor)
-            probs = self.softmax(logits)
-            dist = torch.distributions.Categorical(probs)
-            new_log_probs = dist.log_prob(actions_tensor)
-
-            ratio = torch.exp(new_log_probs - old_log_probs_tensor)
-            #advantage = rewards_tensor
-            if self.normalize_advantage: advantage = (rewards_tensor - rewards_tensor.mean()) / (rewards_tensor.std() + 1e-8)
-            else: advantage = rewards_tensor
-
-            surr1 = ratio * advantage
-            surr2 = torch.clamp(ratio, 1 - self.clip_eps, 1 + self.clip_eps) * advantage
-            #loss = -torch.min(surr1, surr2).mean()
-            entropy = dist.entropy().mean()
-            loss = -torch.min(surr1, surr2).mean() - self.entropy_coef * entropy
-
-            self.optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=1.0)
-            self.optimizer.step()
-            step_loss.append(loss.item())
-
-        self.loss.append(sum(step_loss) / len(step_loss))
-        self.memory.clear()
-    
-    
-# Main script to run the IPPO experiment
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--id', type=str, required=True)
-    parser.add_argument('--project', type=str, default=None)
-    parser.add_argument('--env-conf', type=str, default="config1")
-    parser.add_argument('--task-conf', type=str, required=True)
-    parser.add_argument('--alg-conf', type=str, required=True)
-    parser.add_argument('--net', type=str, required=True)
-    parser.add_argument('--env-seed', type=int, default=42)
-    parser.add_argument('--torch-seed', type=int, default=42)
-    parser.add_argument('--skip-metrics', action='store_true', default=False)
-    add_model_snapshot_argument(parser)
+    parser = add_arguments()
     args = parser.parse_args()
     ALGORITHM = "ippo"
-    exp_id = args.id
-    alg_config = args.alg_conf
-    env_config = args.env_conf
-    task_config = args.task_conf
-    network = args.net
-    env_seed = args.env_seed
-    torch_seed = args.torch_seed
-    save_model_every = args.save_model_every
-    
-    print("### STARTING EXPERIMENT ###")
-    print(f"Algorithm: {ALGORITHM.upper()}")
-    print(f"Experiment ID: {exp_id}")
-    print(f"Network: {network}")
-    print(f"Environment seed: {env_seed}")
-    print(f"Algorithm config: {alg_config}")
-    print(f"Environment config: {env_config}")
-    print(f"Task config: {task_config}")
-    print(f"Metrics will {'NOT ' if args.skip_metrics else ''}be computed after the experiment.\n")
+    configure(args.env_seed, args.torch_seed)
+    declare_setup(args, ALGORITHM)
+    device = get_device()
+    params = read_parameters(args)
 
-    os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
-    logging.getLogger("matplotlib").setLevel(logging.ERROR)
-    torch.manual_seed(torch_seed)
-    torch.cuda.manual_seed(torch_seed)
-    torch.cuda.manual_seed_all(torch_seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    random.seed(env_seed)
-    np.random.seed(env_seed)
-
-    device = (
-        torch.device(0)
-        if torch.cuda.is_available()
-        else torch.device("cpu")
-    )
-    print("Device is: ", device)
-        
-    # Parameter setting
-    params = dict()
-    alg_params = json.load(open(f"../config/algo_config/{ALGORITHM}/{alg_config}.json"))
-    env_params = json.load(open(f"../config/env_config/{env_config}.json"))
-    task_params = json.load(open(f"../config/task_config/{task_config}.json"))
-    params.update(alg_params)
-    params.update(env_params)
-    params.update(task_params)
-    del params["desc"], env_params, task_params
-
-    # set params as variables in this script
     for key, value in params.items():
         globals()[key] = value
+        
+    route_set = resolve_route_set(args.net, args.route_set) if use_clustered_routes else None
+    print(f"Route set: {route_set or 'none (unclustered)'}")
 
-    
-    custom_network_folder = f"../networks/{network}"
+    custom_network_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"../networks/{args.net}")
     phases = [1, human_learning_episodes, int(training_eps) + human_learning_episodes]
     phase_names = ["Human stabilization", "Mutation and AV learning", "Testing phase"]
-    records_folder = f"../results/{exp_id}"
-    plots_folder = f"../results/{exp_id}/plots"
+    
+    base_dir = args.dir if args.dir is not None else os.path.join(os.path.dirname(os.path.abspath(__file__)), "../results")
+    records_folder = os.path.join(base_dir, f"{args.id}")
+    plots_folder = os.path.join(base_dir, f"{args.id}/plots")
 
-    # Read origin-destinations
-    od_file_path = os.path.join(custom_network_folder, f"od_{network}.txt")
+    od_file_path = os.path.join(custom_network_folder, f"od_{args.net}.txt")
     with open(od_file_path, 'r', encoding='utf-8') as f:
         content = f.read()
     data = ast.literal_eval(content)
     origins = data['origins']
     destinations = data['destinations']
 
-    
     # Copy agents.csv from custom_network_folder to records_folder
     agents_csv_path = os.path.join(custom_network_folder, "agents.csv")
     num_agents = len(pd.read_csv(agents_csv_path))
@@ -215,32 +78,86 @@ if __name__ == "__main__":
     num_machines = int(num_agents * ratio_machines)
     total_episodes = human_learning_episodes + training_eps + test_eps
             
-    # Dump exp config to records
     exp_config_path = os.path.join(records_folder, "exp_config.json")
     dump_config = params.copy()
     if args.project is not None:
         dump_config["project"] = args.project
-    dump_config["network"] = network
-    dump_config["env_seed"] = env_seed
-    dump_config["torch_seed"] = torch_seed
-    dump_config["env_config"] = env_config
-    dump_config["task_config"] = task_config
-    dump_config["alg_config"] = alg_config
+
+    action_masks = None
+    route_set_dir = os.path.join(custom_network_folder, "clustered_routes", route_set)
+    clustered_loader = ClusteredRoutesLoader(
+        args.net,
+        custom_network_folder,
+        args.shuffle,
+        args.env_seed,
+        route_set_dir=route_set_dir,
+    )
+    number_of_paths = clustered_loader.get_number_of_paths()
+    clustered_loader.export_paths_routes(records_folder, origins, destinations)
+    action_masks = clustered_loader.create_masks(origins, destinations)
+    if not action_masks:
+        raise ValueError("The clustered route set contains no action masks.")
+
+    for od_pair, mask in action_masks.items():
+        mask_array = np.asarray(mask)
+        if mask_array.shape != (number_of_paths,):
+            raise ValueError(
+                f"Action mask for OD pair {od_pair} has shape "
+                f"{mask_array.shape}; expected ({number_of_paths},)."
+            )
+        if not np.isin(mask_array, (0, 1)).all():
+            raise ValueError(
+                f"Action mask for OD pair {od_pair} must be binary."
+            )
+        if not mask_array.any():
+            raise ValueError(
+                f"Action mask for OD pair {od_pair} has no valid actions."
+            )
+
+    agent_ods = {
+        (int(row.origin), int(row.destination))
+        for row in pd.read_csv(
+            agents_csv_path,
+            usecols=["origin", "destination"],
+        ).itertuples()
+    }
+    missing_ods = sorted(agent_ods.difference(action_masks))
+    if missing_ods:
+        raise ValueError(
+            "Missing action masks for agent OD pairs: "
+            + ", ".join(map(str, missing_ods))
+        )
+
+    create_paths_flag = False
+    dump_config["number_of_paths"] = number_of_paths
+    dump_config["network"] = args.net
+    dump_config["env_seed"] = args.env_seed
+    dump_config["torch_seed"] = args.torch_seed
+    dump_config["route_set"] = route_set
+    dump_config["env_config"] = args.env_conf
+    dump_config["task_config"] = args.task_conf
+    dump_config["alg_config"] = args.alg_conf
     dump_config["script"] = script_path_for_config(__file__)
     dump_config["algorithm"] = ALGORITHM
     dump_config["num_agents"] = num_agents
     dump_config["num_machines"] = num_machines
-    if save_model_every is not None:
-        dump_config["save_model_every"] = save_model_every
+    dump_config["use_clustered_routes"] = use_clustered_routes
+    dump_config["use_action_masks"] = action_masks is not None
+    dump_config["shuffle"] = args.shuffle
+    dump_config["observation_type"] = observations
+    dump_config["path_gen_workers"] = path_gen_workers_value
+    if args.save_model_every is not None:
+        dump_config["save_model_every"] = args.save_model_every
     with open(exp_config_path, 'w', encoding='utf-8') as f:
         json.dump(dump_config, f, indent=4)
 
     
     # Initialize the environment
     env = TrafficEnvironment(
-        seed = env_seed,
+        seed = args.env_seed,
         create_agents = False,
-        create_paths = True,
+        create_paths = False,
+        action_masks = action_masks,
         save_detectors_info = False,
         agent_parameters = {
             "new_machines_after_mutation": num_machines, 
@@ -260,7 +177,7 @@ if __name__ == "__main__":
             "save_every" : save_every,
         },
         simulator_parameters = {
-            "network_name" : network,
+            "network_name" : args.net,
             "custom_network_folder" : custom_network_folder,
             "sumo_type" : "sumo",
             "simulation_timesteps" : max_start_time
@@ -277,9 +194,6 @@ if __name__ == "__main__":
             "origins" : origins,
             "destinations" : destinations,
             "number_of_paths" : number_of_paths,
-            "beta" : path_gen_beta,
-            "num_samples" : num_samples,
-            "path_gen_workers" : path_gen_workers,
             "visualize_paths" : False
         } 
     )
@@ -295,47 +209,94 @@ if __name__ == "__main__":
         env.step()
         pbar.update()
 
-
-    # Mutation
-    env.mutation(disable_human_learning = not should_humans_adapt, mutation_start_percentile = -1)
-    print_agent_counts(env)
+    human_agents_copy = {str(agent.id): agent for agent in env.human_agents}
+    
     obs_size = env.observation_space(env.possible_agents[0]).shape[0]
+    shared_model = PPO(
+            obs_size, agent.action_space_size,
+            device=device, batch_size=batch_size, lr=lr, num_epochs=num_epochs,
+            num_hidden=num_hidden, widths=widths, clip_eps=clip_eps,
+            normalize_advantage=normalize_advantage, entropy_coef=entropy_coef,
+            action_mask=None
+        )
     
-    # Set policies for machine agents
-    for idx in range(len(env.machine_agents)):
-        env.machine_agents[idx].model = PPO(obs_size, env.machine_agents[idx].action_space_size, 
-                                            device=device, batch_size=batch_size, lr=lr, num_epochs=num_epochs,
-                                            num_hidden=num_hidden, widths=widths, clip_eps=clip_eps,
-                                            normalize_advantage=normalize_advantage, entropy_coef=entropy_coef)
-    agent_lookup = {str(agent.id): agent for agent in env.machine_agents}
-    
+    mode_choice_model = dict()
+    pref_av = normal(loc=pref_av_mean, scale=pref_av_std, size=num_agents)
+    wom_coef = normal(loc=wom_coef_mean, scale=wom_coef_std, size=num_agents)
+    inertia = normal(loc=inertia_mean, scale=inertia_std, size=num_agents)
+    tau = normal(loc=tau_mean, scale=tau_std, size=num_agents)
+    av_exp = normal(loc=av_exp_mean, scale=av_exp_std, size=num_agents)
+    connections = generate_social_network(env.all_agents, 
+                                          topology=social_topology, 
+                                          mean_degree=mean_degree,
+                                          rewiring_prob=rewiring_prob, 
+                                          weight_sigma=weight_sigma, 
+                                          ensure_connected=False, 
+                                          seed=args.env_seed
+                                          )
+    for idx, agent in enumerate(env.all_agents):
+        initial_tt_h = agent.last_reward 
+        initial_tt_av = initial_tt_h + av_exp[idx]
+        mode_choice_model[str(agent.id)] = Traveler(
+            agent.id, connections[idx], pref_av[idx], 
+            alpha, wom_coef[idx], inertia[idx], tau[idx], 
+            initial_tt_h, initial_tt_av)
     
     ### Learning phase ###
     pbar.set_description("AV learning")
     os.makedirs(plots_folder, exist_ok=True)
     for episode in range(training_eps):
         env.reset()
+        
+        # Mode choice
+        for agent in env.all_agents:
+            if agent.kind == "Human":
+                human_agents_copy[str(agent.id)] = agent
+            else:
+                env.machine_agents.remove(agent)
+                env.all_agents.remove(agent)
+                env.human_agents.append(human_agents_copy[str(agent.id)])
+                env.all_agents.append(human_agents_copy[str(agent.id)])
+            if mode_choice_model[str(agent.id)].choose():
+                new_av = MachineAgent(agent.id, agent.start_time,
+                                      agent.origin, agent.destination,
+                                      env.agent_params[kc.MACHINE_PARAMETERS], 
+                                      env.action_space_size)
+                env.machine_agents.append(new_av)
+                env.all_agents.append(new_av)
+                env.human_agents.remove(human_agents_copy[str(agent.id)])
+                env.all_agents.remove(human_agents_copy[str(agent.id)])
+
         for agent_id in env.agent_iter():
             observation, reward, termination, truncation, info = env.last()
             
             if termination or truncation:
-                agent_lookup[agent_id].model.push(reward)
-                if episode % update_every == 0:
-                    agent_lookup[agent_id].model.learn()
+                shared_model.push(reward) # fix param sharing!!
+                mode_choice_model[str(agent_id)].learn(reward)
                 action = None
             else:
-                action = agent_lookup[agent_id].model.act(observation)
+                action = shared_model.act(observation)
                 
             env.step(action)
-
+            
+        # issues
+        # humans never learn about mode choice
+        # ippo implementation not suitable for param sharing
+            
+        if episode % update_every == 0:
+            shared_model.learn()
+            
+        wom = {str(agent.id): mode_choice_model[str(agent.id)].emit_wom() for agent in env.all_agents}
+        for agent in env.all_agents:
+            mode_choice_model[str(agent.id)].digest_wom(wom)
+            
         completed_episode = episode + 1
-        if should_save_model_snapshot(completed_episode, training_eps, save_model_every):
+        if should_save_model_snapshot(completed_episode, training_eps, args.save_model_every):
             torch.save(
                 {
                     "training_episode": completed_episode,
                     "models": {
-                        str(agent.id): agent.model.policy_net.state_dict()
-                        for agent in env.machine_agents
+                        "policy_net": shared_model.policy_net.state_dict()
                     },
                 },
                 model_snapshot_path(records_folder, completed_episode, "pt"),
@@ -359,7 +320,7 @@ if __name__ == "__main__":
             if termination or truncation:
                 action = None
             else:
-                action = agent_lookup[agent_id].model.act(observation)
+                action = shared_model.act(observation)
             env.step(action)
         pbar.update()
     
@@ -385,4 +346,4 @@ if __name__ == "__main__":
     env.stop_simulation()
     clear_SUMO_files(os.path.join(records_folder, "SUMO_output"), os.path.join(records_folder, "episodes"), remove_additional_files=True)
     if not args.skip_metrics:
-        run_metrics_analysis(exp_id, results_folder="../results")
+        run_metrics_analysis(args.id, results_folder="../results")
