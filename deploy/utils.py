@@ -26,7 +26,6 @@ def add_arguments() -> argparse.ArgumentParser:
     parser.add_argument('--route-set', type=str, default=None)
     parser.add_argument("--shuffle", action="store_true", default=False)
     parser.add_argument('--skip-metrics', action='store_true', default=False)
-    parser.add_argument("--save-model-every", type=int, default=None)
     return parser
     
     

@@ -1,8 +1,6 @@
 import os
 import sys
 
-from components.social_connections import generate_social_network
-
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if repo_root not in sys.path:
@@ -24,12 +22,12 @@ from routerl         import MachineAgent, HumanAgent
 from tqdm            import tqdm
 from numpy.random    import normal
 
+
 from learners        import PPO
 from utils           import *
-
 from mode_choice      import Traveler
 from components import ClusteredRoutesLoader, resolve_route_set
-
+from components.social_connections import generate_social_network
 
 if __name__ == "__main__":
     parser = add_arguments()
@@ -47,12 +45,14 @@ if __name__ == "__main__":
     print(f"Route set: {route_set or 'none (unclustered)'}")
 
     custom_network_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"../networks/{args.net}")
-    phases = [1, human_learning_episodes, int(training_eps) + human_learning_episodes]
-    phase_names = ["Human stabilization", "Mutation and AV learning", "Testing phase"]
+    phases = [1, human_learning_episodes]
+    phase_names = ["Human stabilization", "Deployment"]
     
     base_dir = args.dir if args.dir is not None else os.path.join(os.path.dirname(os.path.abspath(__file__)), "../results")
-    records_folder = os.path.join(base_dir, f"{args.id}")
+    records_folder = os.path.join(base_dir, f"{args.id}_deploy")
     plots_folder = os.path.join(base_dir, f"{args.id}/plots")
+    mode_choice_save_path = os.path.join(records_folder, "mode_choice/")
+    os.makedirs(mode_choice_save_path, exist_ok=True)
 
     od_file_path = os.path.join(custom_network_folder, f"od_{args.net}.txt")
     with open(od_file_path, 'r', encoding='utf-8') as f:
@@ -75,8 +75,7 @@ if __name__ == "__main__":
     else:
         raise FileNotFoundError(f"Agents CSV file not found at {agents_csv_path}. Please check the network folder.")
             
-    num_machines = int(num_agents * ratio_machines)
-    total_episodes = human_learning_episodes + training_eps + test_eps
+    total_episodes = human_learning_episodes + training_eps
             
     exp_config_path = os.path.join(records_folder, "exp_config.json")
     dump_config = params.copy()
@@ -140,14 +139,11 @@ if __name__ == "__main__":
     dump_config["script"] = script_path_for_config(__file__)
     dump_config["algorithm"] = ALGORITHM
     dump_config["num_agents"] = num_agents
-    dump_config["num_machines"] = num_machines
     dump_config["use_clustered_routes"] = use_clustered_routes
     dump_config["use_action_masks"] = action_masks is not None
     dump_config["shuffle"] = args.shuffle
     dump_config["observation_type"] = observations
     dump_config["path_gen_workers"] = path_gen_workers_value
-    if args.save_model_every is not None:
-        dump_config["save_model_every"] = args.save_model_every
     with open(exp_config_path, 'w', encoding='utf-8') as f:
         json.dump(dump_config, f, indent=4)
 
@@ -160,7 +156,6 @@ if __name__ == "__main__":
         action_masks = action_masks,
         save_detectors_info = False,
         agent_parameters = {
-            "new_machines_after_mutation": num_machines, 
             "human_parameters": {
                 "model": human_model,
                 "alpha": human_alpha,
@@ -202,7 +197,6 @@ if __name__ == "__main__":
     env.reset()
     print_agent_counts(env)
 
-
     ### Human learning phase ###
     pbar = tqdm(total=total_episodes, desc="Human learning")
     for episode in range(human_learning_episodes):
@@ -212,38 +206,41 @@ if __name__ == "__main__":
     human_agents_copy = {str(agent.id): agent for agent in env.human_agents}
     
     obs_size = env.observation_space(env.possible_agents[0]).shape[0]
-    shared_model = PPO(
-            obs_size, agent.action_space_size,
-            device=device, batch_size=batch_size, lr=lr, num_epochs=num_epochs,
-            num_hidden=num_hidden, widths=widths, clip_eps=clip_eps,
-            normalize_advantage=normalize_advantage, entropy_coef=entropy_coef,
-            action_mask=None
-        )
+    # load saved model
+    shared_model = PPO(...)
+    # make it deterministic for deployment
+    shared_model.eval()
     
     mode_choice_model = dict()
     pref_av = normal(loc=pref_av_mean, scale=pref_av_std, size=num_agents)
     wom_coef = normal(loc=wom_coef_mean, scale=wom_coef_std, size=num_agents)
     inertia = normal(loc=inertia_mean, scale=inertia_std, size=num_agents)
     tau = normal(loc=tau_mean, scale=tau_std, size=num_agents)
-    av_exp = normal(loc=av_exp_mean, scale=av_exp_std, size=num_agents)
+    av_bias = normal(loc=av_bias_mean, scale=av_bias_std, size=num_agents)
     connections = generate_social_network(env.all_agents, 
                                           topology=social_topology, 
                                           mean_degree=mean_degree,
                                           rewiring_prob=rewiring_prob, 
                                           weight_sigma=weight_sigma, 
-                                          ensure_connected=False, 
+                                          ensure_connected=ensure_connected, 
                                           seed=args.env_seed
                                           )
     for idx, agent in enumerate(env.all_agents):
         initial_tt_h = agent.last_reward 
-        initial_tt_av = initial_tt_h + av_exp[idx]
+        initial_tt_av = initial_tt_h + av_bias[idx]
         mode_choice_model[str(agent.id)] = Traveler(
             agent.id, connections[idx], pref_av[idx], 
-            alpha, wom_coef[idx], inertia[idx], tau[idx], 
+            mc_alpha, wom_coef[idx], inertia[idx], tau[idx], 
             initial_tt_h, initial_tt_av)
+        
+    mode_choice_stats = list()
+    for agent in env.all_agents:
+        mode_choice_stats.append(mode_choice_model[str(agent.id)].get_state(mode="full"))
+    df = pd.DataFrame(mode_choice_stats)
+    df.to_csv(os.path.join(mode_choice_save_path, f"mode_initial.csv"), index=False)
     
-    ### Learning phase ###
-    pbar.set_description("AV learning")
+    ### Deployment phase ###
+    pbar.set_description("AV deployment")
     os.makedirs(plots_folder, exist_ok=True)
     for episode in range(training_eps):
         env.reset()
@@ -266,82 +263,36 @@ if __name__ == "__main__":
                 env.all_agents.append(new_av)
                 env.human_agents.remove(human_agents_copy[str(agent.id)])
                 env.all_agents.remove(human_agents_copy[str(agent.id)])
-
+                
+        if episode % save_every == 0:
+            mode_choice_stats = list()
+            for agent in env.all_agents:
+                mode_choice_stats.append(mode_choice_model[str(agent.id)].get_state(mode="short"))
+            df = pd.DataFrame(mode_choice_stats)
+            df.to_csv(os.path.join(mode_choice_save_path, f"mode_{episode}.csv"), index=False)
+            
         for agent_id in env.agent_iter():
             observation, reward, termination, truncation, info = env.last()
             
-            if termination or truncation:
-                shared_model.push(reward) # fix param sharing!!
-                mode_choice_model[str(agent_id)].learn(reward)
-                action = None
-            else:
+            action = None
+            if not (termination or truncation):
                 action = shared_model.act(observation)
+            else:
+                mode_choice_model[str(agent_id)].learn(reward)
                 
             env.step(action)
-            
-        # issues
-        # humans never learn about mode choice
-        # ippo implementation not suitable for param sharing
-            
-        if episode % update_every == 0:
-            shared_model.learn()
-            
+        
         wom = {str(agent.id): mode_choice_model[str(agent.id)].emit_wom() for agent in env.all_agents}
         for agent in env.all_agents:
             mode_choice_model[str(agent.id)].digest_wom(wom)
-            
-        completed_episode = episode + 1
-        if should_save_model_snapshot(completed_episode, training_eps, args.save_model_every):
-            torch.save(
-                {
-                    "training_episode": completed_episode,
-                    "models": {
-                        "policy_net": shared_model.policy_net.state_dict()
-                    },
-                },
-                model_snapshot_path(records_folder, completed_episode, "pt"),
-            )
             
         if episode % plot_every == 0:
             env.plot_results()
         pbar.update()
     
-    
-    ### Testing phase ###
-    for agent in env.machine_agents:
-        agent.model.policy_net.eval()
-        agent.model.deterministic = True
-        
-    pbar.set_description("Testing")
-    for episode in range(test_eps):
-        env.reset()
-        for agent_id in env.agent_iter():
-            observation, reward, termination, truncation, info = env.last()
-            if termination or truncation:
-                action = None
-            else:
-                action = shared_model.act(observation)
-            env.step(action)
-        pbar.update()
-    
     # Finalize the experiment
     pbar.close()
     env.plot_results()
-    loss_records = []
-    for agent in env.machine_agents:
-        for iteration, loss_value in enumerate(agent.model.loss, start=1):
-            loss_records.append(
-                {
-                    "iteration": iteration,
-                    "agent_id": agent.id,
-                    "loss": loss_value,
-                }
-            )
-    save_loss_records(
-        records_folder,
-        loss_records,
-        columns=["iteration", "agent_id", "loss"],
-    )
 
     env.stop_simulation()
     clear_SUMO_files(os.path.join(records_folder, "SUMO_output"), os.path.join(records_folder, "episodes"), remove_additional_files=True)

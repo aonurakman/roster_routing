@@ -1,0 +1,19 @@
+{
+    "pref_av_mean" : 0.5,
+    "pref_av_std" : 0.1,
+    "wom_coef_mean" : 0.5,
+    "wom_coef_std" : 0.1,
+    "inertia_mean" : 0.5,
+    "inertia_std" : 0.1,
+    "tau_mean" : 0.5,
+    "tau_std" : 0.1,
+    "av_bias_mean" : 1.0,
+    "av_bias_std" : 0.5,
+    "mc_alpha" : 0.5,
+
+    "social_topology" : "small_world",
+    "mean_degree" : 4,
+    "rewiring_prob" : 0.1,
+    "weight_sigma" : 0.1,
+    "ensure_connected" : false
+}

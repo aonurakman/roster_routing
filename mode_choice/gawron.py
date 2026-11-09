@@ -60,3 +60,29 @@ class Traveler:
             return av_adv
         else:
             return 0.0
+        
+    def get_state(self, mode = "full") -> dict:
+        if mode == "full":
+            return {
+                "id": self.id,
+                "pref_av": self.pref_av,
+                "alpha": self.alpha,
+                "wom_coef": self.wom_coef,
+                "connections": self.connections,
+                "last_choice": self.last_choice,
+                "cost": self.cost.tolist(),
+                "inertia": self.inertia,
+                "wom_signal": self.wom_signal,
+                "tried_av": self.tried_av,
+                "tau": self.tau
+            }
+        elif mode == "short":
+            return {
+                "id": self.id,
+                "last_choice": self.last_choice,
+                "cost": self.cost.tolist(),
+                "wom_signal": self.wom_signal,
+                "tried_av": self.tried_av
+            }
+        else:
+            raise ValueError("Mode must be 'full' or 'short'.")
