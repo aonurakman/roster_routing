@@ -48,10 +48,7 @@ class Traveler:
             self.tried_av = True
     
     def digest_wom(self, woms: dict) -> None:
-        if not self.connections: return
-        self.wom_signal = 0.0
-        for agent_id in self.connections:
-            self.wom_signal += self.connections[agent_id] * woms.get(agent_id, 0.0)
+        self.wom_signal = sum(weight * woms[agent_id] for agent_id, weight in self.connections.items())
     
     def emit_wom(self) -> float:
         if self.tried_av:

@@ -249,16 +249,17 @@ if __name__ == "__main__":
                                           seed=args.env_seed
                                           )
     for idx, agent in enumerate(env.all_agents):
-        initial_tt_h = warmup_tt[int(agent.id)]
+        agent_id = int(agent.id)
+        initial_tt_h = warmup_tt[agent_id]
         initial_tt_av = initial_tt_h + av_bias[idx]
-        mode_choice_model[str(agent.id)] = Traveler(
-            agent.id, connections[idx], pref_av[idx], 
+        mode_choice_model[agent_id] = Traveler(
+            agent_id, connections[agent_id], pref_av[idx],
             mc_alpha, wom_coef[idx], inertia[idx], tau[idx], 
             initial_tt_h, initial_tt_av)
         
     mode_choice_stats = list()
     for agent in env.all_agents:
-        mode_choice_stats.append(mode_choice_model[str(agent.id)].get_state(mode="full"))
+        mode_choice_stats.append(mode_choice_model[int(agent.id)].get_state(mode="full"))
     df = pd.DataFrame(mode_choice_stats)
     df.to_csv(os.path.join(mode_choice_save_path, f"mode_initial.csv"), index=False)
     
@@ -267,14 +268,14 @@ if __name__ == "__main__":
     os.makedirs(plots_folder, exist_ok=True)
     for episode in range(training_eps):
         # Mode choice
-        av_ids = {agent_id for agent_id in human_by_id if mode_choice_model[str(agent_id)].choose()}
+        av_ids = {agent_id for agent_id in human_by_id if mode_choice_model[agent_id].choose()}
         set_daily_population(env, human_by_id, av_ids)
         env.reset()
                 
         if episode % save_every == 0:
             mode_choice_stats = list()
             for agent in env.all_agents:
-                mode_choice_stats.append(mode_choice_model[str(agent.id)].get_state(mode="short"))
+                mode_choice_stats.append(mode_choice_model[int(agent.id)].get_state(mode="short"))
             df = pd.DataFrame(mode_choice_stats)
             df.to_csv(os.path.join(mode_choice_save_path, f"mode_{episode}.csv"), index=False)
             
@@ -293,15 +294,15 @@ if __name__ == "__main__":
             env.step(action)
 
         tt_by_id = {
-            str(trip[kc.AGENT_ID]): float(trip[kc.TRAVEL_TIME])
+            int(trip[kc.AGENT_ID]): float(trip[kc.TRAVEL_TIME])
             for trip in env.last_episode_travel_times
         }
         for agent_id, traveler in mode_choice_model.items():
             traveler.learn(tt_by_id[agent_id])
 
-        wom = {str(agent.id): mode_choice_model[str(agent.id)].emit_wom() for agent in env.all_agents}
-        for agent in env.all_agents:
-            mode_choice_model[str(agent.id)].digest_wom(wom)
+        wom = {agent_id: traveler.emit_wom() for agent_id, traveler in mode_choice_model.items()}
+        for traveler in mode_choice_model.values():
+            traveler.digest_wom(wom)
             
         if episode % plot_every == 0:
             env.plot_results()

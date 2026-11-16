@@ -11,7 +11,7 @@ def generate_social_network(
     ensure_connected=True,
     seed=42,
 ) -> dict:
-    ids = sorted((agent.id for agent in agents), key=int)
+    ids = sorted(int(agent.id) for agent in agents)
 
     n = len(ids)
     rng = np.random.default_rng(seed)
