@@ -9,35 +9,18 @@ from pettingzoo.utils.wrappers import BaseWrapper
 
 
 def resolve_route_set(network_name: str, requested_route_set: str | None) -> str:
-    if requested_route_set is not None:
-        return requested_route_set
-    else:
-        current_dir = Path(__file__).parent.resolve()
-        network_folder = current_dir / "networks" / network_name
-        if not network_folder.is_dir():
-            raise FileNotFoundError(
-                f"Network folder not found: {network_folder}\n"
-                "Make sure the network name is correct and the network is downloaded."
-            )
-        clustered_routes_dir = network_folder / "clustered_routes"
-        if not clustered_routes_dir.is_dir():
-            raise FileNotFoundError(
-                f"Clustered routes folder not found: {clustered_routes_dir}\n"
-                "Generate a clustered route set first, for example:\n"
-                f"  python scripts/generate_clustered_routes.py --net {network_name} "
-                f"--route-set <route-set-name> --config <config-name-or-path>"
-            )
-        # Use the first available route set in the directory
-        available_route_sets = [d.name for d in clustered_routes_dir.iterdir() if d.is_dir()]
+    repo_root = Path(__file__).resolve().parents[1]
+    clustered_routes_dir = repo_root / "networks" / network_name / "clustered_routes"
+    if requested_route_set is None:
+        available_route_sets = sorted(d.name for d in clustered_routes_dir.iterdir() if d.is_dir())
         if not available_route_sets:
-            raise FileNotFoundError(
-                f"No clustered route sets found in {clustered_routes_dir}\n"
-                "Generate a clustered route set first, for example:\n"
-                f"  python scripts/generate_clustered_routes.py --net {network_name} "
-                f"--route-set <route-set-name> --config <config-name-or-path>"
-            )
-        print(f"[CLUSTERED ROUTES] No route set specified. Using the first available route set: {available_route_sets[0]}")
-        return available_route_sets[0]
+            raise FileNotFoundError(f"No clustered route sets found in {clustered_routes_dir}")
+        if len(available_route_sets) > 1:
+            raise ValueError(f"Specify --route-set for {network_name}: {', '.join(available_route_sets)}")
+        requested_route_set = available_route_sets[0]
+
+    validate_clustered_route_set(network_name, clustered_routes_dir / requested_route_set)
+    return requested_route_set
 
 
 def validate_clustered_route_set(
