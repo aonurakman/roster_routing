@@ -18,7 +18,6 @@ import torch
 
 from routerl         import TrafficEnvironment
 from routerl         import Keychain as kc
-from routerl         import MachineAgent
 from tqdm            import tqdm
 from numpy.random    import normal
 
@@ -27,6 +26,7 @@ from learners        import PPO
 from utils           import *
 from mode_choice      import Traveler
 from components import ClusteredRoutesLoader, resolve_route_set
+from components.population import set_daily_population
 from components.social_connections import generate_social_network
 
 if __name__ == "__main__":
@@ -202,7 +202,8 @@ if __name__ == "__main__":
         env.step()
         pbar.update()
 
-    human_agents_copy = {str(agent.id): agent for agent in env.human_agents}
+    human_by_id = {int(agent.id): agent for agent in env.human_agents}
+    traveler_ids = list(human_by_id)
     
     obs_size = env.get_observation_function().OBS_SIZE
     shared_model = PPO(
@@ -217,25 +218,11 @@ if __name__ == "__main__":
     pbar.set_description("AV learning")
     os.makedirs(plots_folder, exist_ok=True)
     for episode in range(training_eps):
-        env.reset()
-        
-        for agent in env.all_agents:
-            if agent.kind == "AV":
-                env.machine_agents.remove(agent)
-                env.all_agents.remove(agent)
-                env.human_agents.append(human_agents_copy[str(agent.id)])
-                env.all_agents.append(human_agents_copy[str(agent.id)])
-        num_agents_to_switch = random.randint(0, len(env.human_agents))
+        num_agents_to_switch = random.randint(0, len(traveler_ids))
         num_agents_to_switch = (num_agents_to_switch // granularity) * granularity
-        agents_to_switch = random.sample(env.human_agents, num_agents_to_switch)
-        for agent in agents_to_switch:
-            env.machine_agents.append(MachineAgent(agent.id, agent.start_time,
-                                                   agent.origin, agent.destination,
-                                                   env.agent_params[kc.MACHINE_PARAMETERS], 
-                                                   env.action_space_size))
-            env.all_agents.append(env.machine_agents[-1])
-            env.human_agents.remove(agent)
-            env.all_agents.remove(agent)
+        av_ids = set(random.sample(traveler_ids, num_agents_to_switch))
+        set_daily_population(env, human_by_id, av_ids)
+        env.reset()
 
         for agent_id in env.agent_iter():
             observation, reward, termination, truncation, info = env.last()

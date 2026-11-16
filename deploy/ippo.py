@@ -18,7 +18,6 @@ import torch
 
 from routerl         import TrafficEnvironment
 from routerl         import Keychain as kc
-from routerl         import MachineAgent
 from tqdm            import tqdm
 from numpy.random    import normal
 
@@ -27,6 +26,7 @@ from learners        import PPO
 from utils           import *
 from mode_choice      import Traveler
 from components import ClusteredRoutesLoader, resolve_route_set
+from components.population import set_daily_population
 from components.social_connections import generate_social_network
 
 if __name__ == "__main__":
@@ -204,7 +204,7 @@ if __name__ == "__main__":
         env.step()
         pbar.update()
 
-    human_agents_copy = {str(agent.id): agent for agent in env.human_agents}
+    human_by_id = {int(agent.id): agent for agent in env.human_agents}
     
     # load saved model
     shared_model = PPO(...)
@@ -243,26 +243,10 @@ if __name__ == "__main__":
     pbar.set_description("AV deployment")
     os.makedirs(plots_folder, exist_ok=True)
     for episode in range(training_eps):
-        env.reset()
-        
         # Mode choice
-        for agent in env.all_agents:
-            if agent.kind == "Human":
-                human_agents_copy[str(agent.id)] = agent
-            else:
-                env.machine_agents.remove(agent)
-                env.all_agents.remove(agent)
-                env.human_agents.append(human_agents_copy[str(agent.id)])
-                env.all_agents.append(human_agents_copy[str(agent.id)])
-            if mode_choice_model[str(agent.id)].choose():
-                new_av = MachineAgent(agent.id, agent.start_time,
-                                      agent.origin, agent.destination,
-                                      env.agent_params[kc.MACHINE_PARAMETERS], 
-                                      env.action_space_size)
-                env.machine_agents.append(new_av)
-                env.all_agents.append(new_av)
-                env.human_agents.remove(human_agents_copy[str(agent.id)])
-                env.all_agents.remove(human_agents_copy[str(agent.id)])
+        av_ids = {agent_id for agent_id in human_by_id if mode_choice_model[str(agent_id)].choose()}
+        set_daily_population(env, human_by_id, av_ids)
+        env.reset()
                 
         if episode % save_every == 0:
             mode_choice_stats = list()
