@@ -255,6 +255,9 @@ if __name__ == "__main__":
             df = pd.DataFrame(mode_choice_stats)
             df.to_csv(os.path.join(mode_choice_save_path, f"mode_{episode}.csv"), index=False)
             
+        if not env.machine_agents:
+            env.step()
+
         for agent_id in env.agent_iter():
             observation, reward, termination, truncation, info = env.last()
             

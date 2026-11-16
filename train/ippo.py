@@ -224,6 +224,9 @@ if __name__ == "__main__":
         set_daily_population(env, human_by_id, av_ids)
         env.reset()
 
+        if not env.machine_agents:
+            env.step()
+
         for agent_id in env.agent_iter():
             observation, reward, termination, truncation, info = env.last()
             
