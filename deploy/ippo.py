@@ -206,7 +206,6 @@ if __name__ == "__main__":
 
     human_agents_copy = {str(agent.id): agent for agent in env.human_agents}
     
-    obs_size = env.observation_space(env.possible_agents[0]).shape[0]
     # load saved model
     shared_model = PPO(...)
     # make it deterministic for deployment

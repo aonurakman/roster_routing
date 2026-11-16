@@ -204,10 +204,9 @@ if __name__ == "__main__":
 
     human_agents_copy = {str(agent.id): agent for agent in env.human_agents}
     
-    obs_size = env.observation_space(env.possible_agents[0]).shape[0]
-    # load saved model
+    obs_size = env.get_observation_function().OBS_SIZE
     shared_model = PPO(
-            obs_size, agent.action_space_size,
+            obs_size, env.action_space_size,
             device=device, batch_size=batch_size, lr=lr, num_epochs=num_epochs,
             num_hidden=num_hidden, widths=widths, clip_eps=clip_eps,
             normalize_advantage=normalize_advantage, entropy_coef=entropy_coef,
