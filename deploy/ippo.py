@@ -263,7 +263,7 @@ if __name__ == "__main__":
             
             action = None
             if not (termination or truncation):
-                action = shared_model.act(observation)
+                action = shared_model.act(observation, agent_id, record=False)
             else:
                 mode_choice_model[str(agent_id)].learn(reward)
                 

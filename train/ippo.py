@@ -232,12 +232,14 @@ if __name__ == "__main__":
             
             action = None
             if not (termination or truncation):
-                action = shared_model.act(observation)
+                action = shared_model.act(observation, agent_id)
             else:
-                shared_model.push(reward)
+                shared_model.push(agent_id, reward)
                 action = None
                 
             env.step(action)
+
+        assert not shared_model.pending, "Some AV actions did not receive rewards"
             
         if episode % update_every == 0:
             shared_model.learn()

@@ -1,4 +1,5 @@
 import random
+import numpy as np
 import torch
 
 from torch import optim
@@ -27,6 +28,7 @@ class PPO:
         
         self.loss = list()
         self.memory = list()
+        self.pending = {}
         self.deterministic = False
 
         if action_mask is None:
@@ -57,7 +59,7 @@ class PPO:
             )
         return torch.distributions.Categorical(probs=self.softmax(logits))
 
-    def act(self, state, mask=None):
+    def act(self, state, agent_id, mask=None, record=True):
         if mask is not None and self.action_mask is not None:
             raise ValueError("Cannot provide both a step mask and a persistent action mask.")
         state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
@@ -67,16 +69,16 @@ class PPO:
             action = dist.sample().item()
         else:
             action = torch.argmax(dist.probs).item()
-        self.last_state = state
-        self.last_action = action
-        self.last_log_prob = dist.log_prob(
-            torch.tensor(action, device=self.device)
-        ).item()
+        if record:
+            key = int(agent_id)
+            assert key not in self.pending, f"Agent {key} already has a pending action"
+            log_prob = dist.log_prob(torch.tensor(action, device=self.device)).item()
+            self.pending[key] = (np.array(state, dtype=np.float32, copy=True), action, log_prob)
         return action
 
-    def push(self, reward):
-        self.memory.append((self.last_state, self.last_action, self.last_log_prob, reward))
-        del self.last_state, self.last_action, self.last_log_prob
+    def push(self, agent_id, reward):
+        state, action, log_prob = self.pending.pop(int(agent_id))
+        self.memory.append((state, action, log_prob, reward))
 
     def learn(self):
         if len(self.memory) < self.batch_size: return
@@ -85,7 +87,7 @@ class PPO:
         for _ in range(self.num_epochs):
             batch = random.sample(self.memory, self.batch_size)
             states, actions, old_log_probs, rewards = zip(*batch)
-            states_tensor = torch.FloatTensor(states).to(self.device)
+            states_tensor = torch.FloatTensor(np.stack(states)).to(self.device)
             actions_tensor = torch.LongTensor(actions).to(self.device)
             old_log_probs_tensor = torch.FloatTensor(old_log_probs).to(self.device)
             rewards_tensor = torch.FloatTensor(rewards).to(self.device)
