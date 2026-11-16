@@ -282,18 +282,23 @@ if __name__ == "__main__":
             env.step()
 
         for agent_id in env.agent_iter():
-            observation, reward, termination, truncation, info = env.last()
+            observation, _, termination, truncation, _ = env.last()
             
             action = None
             if not (termination or truncation):
                 agent = human_by_id[int(agent_id)]
                 mask = action_masks[(agent.origin, agent.destination)]
                 action = shared_model.act(observation, agent_id, mask=mask, record=False)
-            else:
-                mode_choice_model[str(agent_id)].learn(reward)
                 
             env.step(action)
-        
+
+        tt_by_id = {
+            str(trip[kc.AGENT_ID]): float(trip[kc.TRAVEL_TIME])
+            for trip in env.last_episode_travel_times
+        }
+        for agent_id, traveler in mode_choice_model.items():
+            traveler.learn(tt_by_id[agent_id])
+
         wom = {str(agent.id): mode_choice_model[str(agent.id)].emit_wom() for agent in env.all_agents}
         for agent in env.all_agents:
             mode_choice_model[str(agent.id)].digest_wom(wom)
