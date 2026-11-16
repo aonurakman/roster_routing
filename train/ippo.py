@@ -18,7 +18,7 @@ import torch
 
 from routerl         import TrafficEnvironment
 from routerl         import Keychain as kc
-from routerl         import MachineAgent, HumanAgent
+from routerl         import MachineAgent
 from tqdm            import tqdm
 from numpy.random    import normal
 
