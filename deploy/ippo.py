@@ -229,6 +229,10 @@ if __name__ == "__main__":
         pbar.update()
 
     human_by_id = {int(agent.id): agent for agent in env.human_agents}
+    warmup_tt = {
+        int(trip[kc.AGENT_ID]): float(trip[kc.TRAVEL_TIME])
+        for trip in env.last_episode_travel_times
+    }
     
     mode_choice_model = dict()
     pref_av = normal(loc=pref_av_mean, scale=pref_av_std, size=num_agents)
@@ -245,7 +249,7 @@ if __name__ == "__main__":
                                           seed=args.env_seed
                                           )
     for idx, agent in enumerate(env.all_agents):
-        initial_tt_h = agent.last_reward 
+        initial_tt_h = warmup_tt[int(agent.id)]
         initial_tt_av = initial_tt_h + av_bias[idx]
         mode_choice_model[str(agent.id)] = Traveler(
             agent.id, connections[idx], pref_av[idx], 
