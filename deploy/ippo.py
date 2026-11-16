@@ -48,7 +48,7 @@ if __name__ == "__main__":
     configure(args.env_seed, args.torch_seed)
     declare_setup(args, ALGORITHM, network, route_set)
     device = get_device()
-    params = read_parameters(args, ALGORITHM)
+    params = read_parameters(args)
     params["observations"] = training_config["observation_type"]
 
     for key, value in params.items():
@@ -58,7 +58,7 @@ if __name__ == "__main__":
         raise NotImplementedError("This script requires clustered routes.")
 
     custom_network_folder = os.path.join(repo_root, "networks", network)
-    phases = [1, human_learning_episodes]
+    phases = [1, human_learning_episodes + 1]
     phase_names = ["Human stabilization", "Deployment"]
     
     records_folder = os.path.join(base_dir, f"{args.id}_deploy")
@@ -87,7 +87,7 @@ if __name__ == "__main__":
     else:
         raise FileNotFoundError(f"Agents CSV file not found at {agents_csv_path}. Please check the network folder.")
             
-    total_episodes = human_learning_episodes + training_eps
+    total_episodes = human_learning_episodes + deployment_eps
             
     exp_config_path = os.path.join(records_folder, "exp_config.json")
     dump_config = params.copy()
@@ -154,7 +154,6 @@ if __name__ == "__main__":
     dump_config["route_set"] = route_set
     dump_config["env_config"] = args.env_conf
     dump_config["task_config"] = args.task_conf
-    dump_config["alg_config"] = args.alg_conf
     dump_config["script"] = script_path_for_config(__file__)
     dump_config["algorithm"] = ALGORITHM
     dump_config["num_agents"] = num_agents
@@ -266,7 +265,7 @@ if __name__ == "__main__":
     ### Deployment phase ###
     pbar.set_description("AV deployment")
     os.makedirs(plots_folder, exist_ok=True)
-    for episode in range(training_eps):
+    for episode in range(deployment_eps):
         # Mode choice
         av_ids = {agent_id for agent_id in human_by_id if mode_choice_model[agent_id].choose()}
         set_daily_population(env, human_by_id, av_ids)

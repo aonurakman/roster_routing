@@ -37,6 +37,7 @@ if __name__ == "__main__":
     declare_setup(args, ALGORITHM)
     device = get_device()
     params = read_parameters(args, ALGORITHM)
+    params.pop("deployment_eps", None)
 
     for key, value in params.items():
         globals()[key] = value
@@ -47,8 +48,8 @@ if __name__ == "__main__":
     print(f"Route set: {route_set}")
 
     custom_network_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"../networks/{args.net}")
-    phases = [1, human_learning_episodes]
-    phase_names = ["Human stabilization", "Deployment"]
+    phases = [1, human_learning_episodes + 1]
+    phase_names = ["Human stabilization", "AV training"]
     
     base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../results")
     records_folder = os.path.join(base_dir, f"{args.id}_train")

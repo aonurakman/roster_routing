@@ -465,7 +465,8 @@ def slice_episodes(df: pd.DataFrame, config: dict) -> dict:
     Output data frames:
         - 'before_mutation' - last 50 episodes of human learning phase (before mutation); or all human learning episodes if less than 50.
         - 'after_mutation' - all episodes with CAVS - starting from episode after mutation, ending with the end of the experiment.
-        - 'testing_frames' - episodes from testing phase only.
+        - 'testing_frames' - episodes from testing or deployment.
+        - 'deployment_frames' - deployment episodes, when configured.
         - 'training_frames' - episodes from CAV training period only.
 
     Args:
@@ -476,33 +477,33 @@ def slice_episodes(df: pd.DataFrame, config: dict) -> dict:
     """
 
 
-    # Development note:
-    #   TODO: generalize phase handling.
-    #   Move phase definition and boundary computation (e.g., hl, experience_collecting, training, testing) to the experiment scripts (URB/scripts/<algo>.py),
-    #   store boundaries explictky in exp_config, and consume them here (metrics).
-
-    # Phase lengths
     hl_episodes = int(config["human_learning_episodes"])
+    episodes = df["episode"]
+    before_mutation = df[(episodes <= hl_episodes) & (episodes > hl_episodes - 50)].copy()
+
+    deployment_eps = config.get("deployment_eps")
+    if deployment_eps is not None:
+        deployment_frames = df[episodes.between(hl_episodes + 1, hl_episodes + int(deployment_eps))].copy()
+        return {
+            "before_mutation": before_mutation,
+            "after_mutation": deployment_frames,
+            "training_frames": df.iloc[:0].copy(),
+            "testing_frames": deployment_frames,
+            "deployment_frames": deployment_frames,
+        }
+
     experience_collecting_eps = int(config["experience_collecting_episodes"])
     training_eps = int(config["training_eps"])
 
-    # Assuming episode indexing starts from 1
     trainphase_start_episode = hl_episodes + experience_collecting_eps + 1
-    testphase_start_episode = hl_episodes + experience_collecting_eps + training_eps + 1
-
-
+    testphase_start_episode = trainphase_start_episode + training_eps
     return {
-        "before_mutation": df[
-            (df["episode"] <= hl_episodes)
-            & (df["episode"] > hl_episodes - 50)  # Last 50 days of simulation taken as human policy testing period
+        "before_mutation": before_mutation,
+        "after_mutation": df[episodes > hl_episodes].copy(),
+        "training_frames": df[
+            (episodes >= trainphase_start_episode) & (episodes < testphase_start_episode)
         ].copy(),
-        "after_mutation": df[df["episode"] > hl_episodes].copy(),
-
-        "training_frames": df[ 
-            (df["episode"] >= trainphase_start_episode)
-            & (df["episode"] < testphase_start_episode)
-        ].copy(),
-        "testing_frames": df[df["episode"] >= testphase_start_episode].copy(),
+        "testing_frames": df[episodes >= testphase_start_episode].copy(),
     }
 
 
@@ -904,7 +905,9 @@ if __name__ == "__main__":
         print(f"Error: Combined data file not found at {combined_csv_path}. Cannot extract metrics.")
         sys.exit(1)
 
-    if "training_eps" in exp_config:
+    if "deployment_eps" in exp_config:
+        computed_training_eps = 0
+    elif "training_eps" in exp_config:
         computed_training_eps = exp_config["training_eps"]
     elif "n_iters" in exp_config and "agent_frames_per_batch" in exp_config:
         computed_training_eps = exp_config["n_iters"] * exp_config["agent_frames_per_batch"]
@@ -921,6 +924,7 @@ if __name__ == "__main__":
 
         "human_learning_episodes": exp_config["human_learning_episodes"],
         "training_eps": computed_training_eps,
+        "deployment_eps": exp_config.get("deployment_eps"),
         "experience_collecting_episodes": exp_config.get("experience_collecting_episodes", 0), # Use .get for non-critical keys
         "test_eps": exp_config.get("test_eps", 0), # Use .get for non-critical keys
     }

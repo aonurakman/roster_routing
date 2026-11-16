@@ -20,7 +20,6 @@ def add_arguments() -> argparse.ArgumentParser:
     parser.add_argument('--project', type=str, default=None)
     parser.add_argument('--env-conf', type=str, default="config1")
     parser.add_argument('--task-conf', type=str, required=True)
-    parser.add_argument('--alg-conf', type=str, required=True)
     parser.add_argument('--env-seed', type=int, default=42)
     parser.add_argument('--torch-seed', type=int, default=42)
     parser.add_argument('--skip-metrics', action='store_true', default=False)
@@ -36,7 +35,6 @@ def declare_setup(args: argparse.Namespace, alg: str, network: str, route_set: s
     print(f"Training run: {args.training_run}")
     print(f"Network: {network}")
     print(f"Environment seed: {args.env_seed}")
-    print(f"Algorithm config: {args.alg_conf}")
     print(f"Environment config: {args.env_conf}")
     print(f"Task config: {args.task_conf}")
     print(f"Route set: {route_set}")
@@ -65,11 +63,9 @@ def get_device(declare: bool = True) -> torch.device:
         print(f"Device: {device}")
     return device
     
-def read_parameters(args: argparse.Namespace, alg: str) -> dict:
+def read_parameters(args: argparse.Namespace) -> dict:
     config_root = Path(__file__).resolve().parents[1] / "config"
     params = dict()
-    with (config_root / "algo_config" / alg / f"{args.alg_conf}.json").open(encoding="utf-8") as f:
-        params.update(json.load(f))
     with (config_root / "env_config" / f"{args.env_conf}.json").open(encoding="utf-8") as f:
         params.update(json.load(f))
     with (config_root / "task_config" / f"{args.task_conf}.json").open(encoding="utf-8") as f:
