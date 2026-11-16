@@ -261,21 +261,11 @@ if __name__ == "__main__":
     pbar.close()
     env.plot_results()
 
-    loss_records = []
-    for agent in env.machine_agents:
-        for iteration, loss_value in enumerate(agent.model.loss, start=1):
-            loss_records.append(
-                {
-                    "iteration": iteration,
-                    "agent_id": agent.id,
-                    "loss": loss_value,
-                }
-            )
-    save_loss_records(
-        records_folder,
-        loss_records,
-        columns=["iteration", "agent_id", "loss"],
-    )
+    loss_records = [
+        {"iteration": iteration, "loss": loss}
+        for iteration, loss in enumerate(shared_model.loss, start=1)
+    ]
+    save_loss_records(records_folder, loss_records, columns=["iteration", "loss"])
 
     env.stop_simulation()
     clear_SUMO_files(os.path.join(records_folder, "SUMO_output"), os.path.join(records_folder, "episodes"), remove_additional_files=True)
