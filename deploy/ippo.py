@@ -78,7 +78,6 @@ if __name__ == "__main__":
     agents_csv_path = os.path.join(custom_network_folder, "agents.csv")
     num_agents = len(pd.read_csv(agents_csv_path))
     if os.path.exists(agents_csv_path):
-        os.makedirs(records_folder, exist_ok=True)
         new_agents_csv_path = os.path.join(records_folder, "agents.csv")
         with open(agents_csv_path, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -90,16 +89,10 @@ if __name__ == "__main__":
             
     total_episodes = human_learning_episodes + deployment_eps
             
-    exp_config_path = os.path.join(records_folder, "exp_config.json")
-    dump_config = params.copy()
-    if args.project is not None:
-        dump_config["project"] = args.project
-
     action_masks = None
     route_set_dir = os.path.join(custom_network_folder, "clustered_routes", route_set)
     clustered_loader = ClusteredRoutesLoader(network, route_set_dir=route_set_dir)
     number_of_paths = clustered_loader.get_number_of_paths()
-    clustered_loader.export_paths_routes(records_folder, origins, destinations)
     action_masks = clustered_loader.create_masks(origins, destinations)
     if not action_masks:
         raise ValueError("The clustered route set contains no action masks.")
@@ -134,6 +127,31 @@ if __name__ == "__main__":
             + ", ".join(map(str, missing_ods))
         )
 
+    exp_config_path = os.path.join(records_folder, "exp_config.json")
+    dump_config = params.copy()
+    if args.project is not None:
+        dump_config["project"] = args.project
+    dump_config["network"] = network
+    dump_config["env_seed"] = args.env_seed
+    dump_config["torch_seed"] = args.torch_seed
+    dump_config["route_set"] = route_set
+    dump_config["env_config"] = args.env_conf
+    dump_config["task_config"] = args.task_conf
+    dump_config["script"] = script_path_for_config(__file__)
+    dump_config["algorithm"] = ALGORITHM
+    dump_config["observation_type"] = observations
+    dump_config["training_run"] = args.training_run
+    dump_config["checkpoint"] = str(checkpoint_path)
+    dump_config["checkpoint_sha256"] = sha256(checkpoint_path.read_bytes()).hexdigest()
+    dump_config["action_selection"] = args.action_selection
+    dump_config["number_of_paths"] = number_of_paths
+    dump_config["num_agents"] = num_agents
+    dump_config["use_action_masks"] = action_masks is not None
+    with open(exp_config_path, 'w', encoding='utf-8') as f:
+        json.dump(dump_config, f, indent=4)
+
+    clustered_loader.export_paths_routes(records_folder, origins, destinations)
+
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
     if "model_config" not in checkpoint or "routing_spec" not in checkpoint:
         raise ValueError("Checkpoint is missing model or routing metadata. Use a new IPPO training checkpoint.")
@@ -146,27 +164,6 @@ if __name__ == "__main__":
     shared_model.policy_net.eval()
     shared_model.policy_net.requires_grad_(False)
     shared_model.deterministic = args.action_selection == 'argmax'
-
-    create_paths_flag = False
-    dump_config["number_of_paths"] = number_of_paths
-    dump_config["network"] = network
-    dump_config["env_seed"] = args.env_seed
-    dump_config["torch_seed"] = args.torch_seed
-    dump_config["route_set"] = route_set
-    dump_config["env_config"] = args.env_conf
-    dump_config["task_config"] = args.task_conf
-    dump_config["script"] = script_path_for_config(__file__)
-    dump_config["algorithm"] = ALGORITHM
-    dump_config["num_agents"] = num_agents
-    dump_config["use_clustered_routes"] = use_clustered_routes
-    dump_config["use_action_masks"] = action_masks is not None
-    dump_config["observation_type"] = observations
-    dump_config["training_run"] = args.training_run
-    dump_config["checkpoint"] = str(checkpoint_path)
-    dump_config["checkpoint_sha256"] = sha256(checkpoint_path.read_bytes()).hexdigest()
-    dump_config["action_selection"] = args.action_selection
-    with open(exp_config_path, 'w', encoding='utf-8') as f:
-        json.dump(dump_config, f, indent=4)
 
     
     # Initialize the environment
