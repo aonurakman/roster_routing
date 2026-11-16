@@ -1,10 +1,17 @@
 import argparse
 import csv
+import json
+import logging
 import os
+import random
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import Optional
+
+import numpy as np
+import torch
 
 
 def add_arguments() -> argparse.ArgumentParser:
@@ -61,10 +68,14 @@ def get_device(declare: bool = True) -> torch.device:
     return device
     
 def read_parameters(args: argparse.Namespace, alg: str) -> dict:
+    config_root = Path(__file__).resolve().parents[1] / "config"
     params = dict()
-    params.update(json.load(open(f"../config/algo_config/{alg}/{args.alg_conf}.json")))
-    params.update(json.load(open(f"../config/env_config/{args.env_conf}.json")))
-    params.update(json.load(open(f"../config/task_config/{args.task_conf}.json")))
+    with (config_root / "algo_config" / alg / f"{args.alg_conf}.json").open(encoding="utf-8") as f:
+        params.update(json.load(f))
+    with (config_root / "env_config" / f"{args.env_conf}.json").open(encoding="utf-8") as f:
+        params.update(json.load(f))
+    with (config_root / "task_config" / f"{args.task_conf}.json").open(encoding="utf-8") as f:
+        params.update(json.load(f))
     return params
 
 
