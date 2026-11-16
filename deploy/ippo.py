@@ -255,7 +255,7 @@ if __name__ == "__main__":
         mode_choice_model[agent_id] = Traveler(
             agent_id, connections[agent_id], pref_av[idx],
             mc_alpha, wom_coef[idx], inertia[idx], tau[idx], 
-            initial_tt_h, initial_tt_av)
+            initial_tt_h, initial_tt_av, args.env_seed)
         
     mode_choice_stats = list()
     for agent in env.all_agents:

@@ -4,7 +4,8 @@ from scipy.special import expit
 
 class Traveler:
 
-    def __init__(self, agent_id, connections, pref_av, alpha, wom_coef, inertia, tau, initial_tt_h, initial_tt_av):
+    def __init__(self, agent_id, connections, pref_av, alpha, wom_coef, inertia, tau,
+                 initial_tt_h, initial_tt_av, seed):
         assert 0 <= alpha <= 1
         assert tau > 0
         assert wom_coef >= 0
@@ -12,7 +13,7 @@ class Traveler:
         assert all(w >= 0 for w in connections.values())
         assert not connections or np.isclose(sum(connections.values()), 1.0)
         assert initial_tt_h > 0 and initial_tt_av > 0
-        self.rng = np.random.default_rng(seed=agent_id)
+        self.rng = np.random.default_rng([agent_id + 1, seed])
         self.id = agent_id
         self.pref_av = pref_av
         self.alpha = alpha
