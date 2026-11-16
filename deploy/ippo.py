@@ -263,7 +263,9 @@ if __name__ == "__main__":
             
             action = None
             if not (termination or truncation):
-                action = shared_model.act(observation, agent_id, record=False)
+                agent = human_by_id[int(agent_id)]
+                mask = action_masks[(agent.origin, agent.destination)]
+                action = shared_model.act(observation, agent_id, mask=mask, record=False)
             else:
                 mode_choice_model[str(agent_id)].learn(reward)
                 

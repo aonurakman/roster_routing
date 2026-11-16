@@ -232,7 +232,9 @@ if __name__ == "__main__":
             
             action = None
             if not (termination or truncation):
-                action = shared_model.act(observation, agent_id)
+                agent = human_by_id[int(agent_id)]
+                mask = action_masks[(agent.origin, agent.destination)]
+                action = shared_model.act(observation, agent_id, mask=mask)
             else:
                 shared_model.push(agent_id, reward)
                 action = None

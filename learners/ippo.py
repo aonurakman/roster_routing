@@ -42,25 +42,19 @@ class PPO:
 
     def _distribution(self, state_tensor, mask=None):
         logits = self.policy_net(state_tensor)
-        if self.action_mask is not None:
-            logits = logits.masked_fill(
-                ~self.action_mask.unsqueeze(0),
-                float("-inf"),
-            )
-        elif mask is not None:
+        if mask is not None:
             mask_tensor = torch.as_tensor(
                 mask,
                 dtype=torch.bool,
                 device=self.device,
             )
-            logits = logits.masked_fill(
-                ~mask_tensor.unsqueeze(0),
-                float("-inf"),
-            )
+            logits = logits.masked_fill(~mask_tensor, float("-inf"))
         return torch.distributions.Categorical(probs=self.softmax(logits))
 
     def act(self, state, agent_id, mask=None, record=True):
-        if mask is not None and self.action_mask is not None:
+        if mask is None:
+            mask = self.action_mask
+        elif self.action_mask is not None:
             raise ValueError("Cannot provide both a step mask and a persistent action mask.")
         state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
@@ -73,12 +67,17 @@ class PPO:
             key = int(agent_id)
             assert key not in self.pending, f"Agent {key} already has a pending action"
             log_prob = dist.log_prob(torch.tensor(action, device=self.device)).item()
-            self.pending[key] = (np.array(state, dtype=np.float32, copy=True), action, log_prob)
+            state = np.array(state, dtype=np.float32, copy=True)
+            if mask is None:
+                mask = np.ones(self.action_space_size, dtype=bool)
+            else:
+                mask = torch.as_tensor(mask, dtype=torch.bool, device="cpu").numpy().flatten()
+            self.pending[key] = (state, action, log_prob, mask)
         return action
 
     def push(self, agent_id, reward):
-        state, action, log_prob = self.pending.pop(int(agent_id))
-        self.memory.append((state, action, log_prob, reward))
+        state, action, log_prob, mask = self.pending.pop(int(agent_id))
+        self.memory.append((state, action, log_prob, reward, mask))
 
     def learn(self):
         if len(self.memory) < self.batch_size: return
@@ -86,13 +85,13 @@ class PPO:
 
         for _ in range(self.num_epochs):
             batch = random.sample(self.memory, self.batch_size)
-            states, actions, old_log_probs, rewards = zip(*batch)
+            states, actions, old_log_probs, rewards, masks = zip(*batch)
             states_tensor = torch.FloatTensor(np.stack(states)).to(self.device)
             actions_tensor = torch.LongTensor(actions).to(self.device)
             old_log_probs_tensor = torch.FloatTensor(old_log_probs).to(self.device)
             rewards_tensor = torch.FloatTensor(rewards).to(self.device)
 
-            dist = self._distribution(states_tensor)
+            dist = self._distribution(states_tensor, np.stack(masks))
             new_log_probs = dist.log_prob(actions_tensor)
 
             ratio = torch.exp(new_log_probs - old_log_probs_tensor)
