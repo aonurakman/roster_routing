@@ -49,6 +49,7 @@ if __name__ == "__main__":
     declare_setup(args, ALGORITHM, network, route_set)
     device = get_device()
     params = read_parameters(args)
+    params.pop("humans_adapt_during_pretraining", None)
     params["observations"] = training_config["observation_type"]
 
     for key, value in params.items():
@@ -263,6 +264,7 @@ if __name__ == "__main__":
     df.to_csv(os.path.join(mode_choice_save_path, f"mode_initial.csv"), index=False)
     
     ### Deployment phase ###
+    env.human_learning = True
     pbar.set_description("AV deployment")
     os.makedirs(plots_folder, exist_ok=True)
     for episode in range(deployment_eps):

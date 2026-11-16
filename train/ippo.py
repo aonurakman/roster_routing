@@ -210,6 +210,7 @@ if __name__ == "__main__":
     routing_spec = clustered_loader.routing_spec(records_folder, observations)
     
     ### Learning phase ###
+    env.human_learning = humans_adapt_during_pretraining
     pbar.set_description("AV learning")
     os.makedirs(plots_folder, exist_ok=True)
     for episode in range(training_eps):

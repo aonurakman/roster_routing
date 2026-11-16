@@ -20,6 +20,7 @@
     "granularity" : 100,
     "human_learning_episodes" : 300,
     "deployment_eps" : 4000,
+    "humans_adapt_during_pretraining" : false,
     "human_model" : "gawron",
     "human_alpha" : 0.2,
     "human_beta" : 1.5,
