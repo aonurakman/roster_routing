@@ -41,8 +41,10 @@ if __name__ == "__main__":
     for key, value in params.items():
         globals()[key] = value
         
-    route_set = resolve_route_set(args.net, args.route_set) if use_clustered_routes else None
-    print(f"Route set: {route_set or 'none (unclustered)'}")
+    if not use_clustered_routes:
+        raise NotImplementedError("This script requires clustered routes.")
+    route_set = resolve_route_set(args.net, args.route_set)
+    print(f"Route set: {route_set}")
 
     custom_network_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"../networks/{args.net}")
     phases = [1, human_learning_episodes]

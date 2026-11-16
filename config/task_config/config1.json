@@ -17,5 +17,12 @@
     "weight_sigma" : 0.1,
     "ensure_connected" : false,
 
-    "granularity" : 100
+    "granularity" : 100,
+    "human_learning_episodes" : 300,
+    "human_model" : "gawron",
+    "human_alpha" : 0.2,
+    "human_beta" : 1.5,
+    "human_beta_randomness" : 0.1,
+    "human_deterministic" : false,
+    "av_behavior" : "collaborative"
 }
