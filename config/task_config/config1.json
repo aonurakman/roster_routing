@@ -15,5 +15,7 @@
     "mean_degree" : 4,
     "rewiring_prob" : 0.1,
     "weight_sigma" : 0.1,
-    "ensure_connected" : false
+    "ensure_connected" : false,
+
+    "granularity" : 100
 }

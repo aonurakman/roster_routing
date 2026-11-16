@@ -6,18 +6,12 @@ import sys
 import xml.etree.ElementTree as ET
 from typing import Optional
 
-from legacy.scripts.baselines_clusters import ALGORITHM
-
 
 def add_arguments() -> argparse.ArgumentParser:
-    # what is the best way of assigning each of these to a variable?
-    # answer: use the argparse module to parse command line arguments and assign them to variables
-    # show example
-    # example: my_variable = args.my_variable
     parser = argparse.ArgumentParser()
     parser.add_argument('--id', type=str, required=True)
     parser.add_argument('--project', type=str, default=None)
-    parser.add_argument('--env-conf', type=str, default="clusters")
+    parser.add_argument('--env-conf', type=str, default="config1")
     parser.add_argument('--task-conf', type=str, required=True)
     parser.add_argument('--alg-conf', type=str, required=True)
     parser.add_argument('--net', type=str, required=True)
@@ -65,24 +59,12 @@ def get_device(declare: bool = True) -> torch.device:
         print(f"Device: {device}")
     return device
     
-def read_parameters(args: argparse.Namespace) -> dict:
+def read_parameters(args: argparse.Namespace, alg: str) -> dict:
     params = dict()
-    params.update(json.load(open(f"../config/algo_config/{ALGORITHM}/{args.alg_conf}.json")))
+    params.update(json.load(open(f"../config/algo_config/{alg}/{args.alg_conf}.json")))
     params.update(json.load(open(f"../config/env_config/{args.env_conf}.json")))
     params.update(json.load(open(f"../config/task_config/{args.task_conf}.json")))
     return params
-
-
-def should_save_model_snapshot(
-    completed_episode: int,
-    training_episodes: int,
-    save_model_every: Optional[int],
-) -> bool:
-    """Return whether a policy snapshot is due after this training episode."""
-    return save_model_every is not None and (
-        completed_episode % save_model_every == 0
-        or completed_episode == training_episodes
-    )
 
 
 def model_snapshot_path(
@@ -97,12 +79,6 @@ def model_snapshot_path(
         models_folder,
         f"training_ep_{completed_episode:06d}.{extension.lstrip('.')}",
     )
-
-
-def warn_model_snapshots_unsupported(save_model_every: Optional[int]) -> None:
-    """Explain when a script accepts but does not implement policy snapshots."""
-    if save_model_every is not None:
-        print("Warning: --save-model-every is not supported by this script and will be ignored.")
 
 
 class CSVLossLogger:
@@ -231,31 +207,6 @@ def print_agent_counts(env):
     AV agents              | {len(env.machine_agents)}
     ----------------------------------------------------
     """)
-
-
-def save_loss_records(records_folder: str, loss_records: list[dict], columns: list[str]) -> str:
-    """
-    Save training loss records to a unified CSV file.
-
-    Args:
-        records_folder (str): Experiment output folder (e.g. ../results/<exp_id>).
-        loss_records (list[dict]): Row-wise loss data.
-        columns (list[str]): Ordered CSV columns.
-
-    Returns:
-        str: Absolute path to the saved CSV file.
-    """
-    losses_folder = os.path.join(records_folder, "losses")
-    os.makedirs(losses_folder, exist_ok=True)
-    loss_csv_path = os.path.join(losses_folder, "losses.csv")
-
-    with open(loss_csv_path, "w", newline="", encoding="utf-8") as loss_file:
-        writer = csv.DictWriter(loss_file, fieldnames=columns, extrasaction='ignore')
-        writer.writeheader()
-        for row in loss_records:
-            writer.writerow({column: row.get(column, "") for column in columns})
-
-    return os.path.abspath(loss_csv_path)
 
 
 def script_path_for_config(script_file: str, repo_root: Optional[str] = None) -> str:

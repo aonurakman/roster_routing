@@ -36,7 +36,7 @@ if __name__ == "__main__":
     configure(args.env_seed, args.torch_seed)
     declare_setup(args, ALGORITHM)
     device = get_device()
-    params = read_parameters(args)
+    params = read_parameters(args, ALGORITHM)
 
     for key, value in params.items():
         globals()[key] = value
@@ -48,7 +48,7 @@ if __name__ == "__main__":
     phases = [1, human_learning_episodes]
     phase_names = ["Human stabilization", "Deployment"]
     
-    base_dir = args.dir if args.dir is not None else os.path.join(os.path.dirname(os.path.abspath(__file__)), "../results")
+    base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../results")
     records_folder = os.path.join(base_dir, f"{args.id}_deploy")
     plots_folder = os.path.join(base_dir, f"{args.id}/plots")
     mode_choice_save_path = os.path.join(records_folder, "mode_choice/")
@@ -143,7 +143,6 @@ if __name__ == "__main__":
     dump_config["use_action_masks"] = action_masks is not None
     dump_config["shuffle"] = args.shuffle
     dump_config["observation_type"] = observations
-    dump_config["path_gen_workers"] = path_gen_workers_value
     with open(exp_config_path, 'w', encoding='utf-8') as f:
         json.dump(dump_config, f, indent=4)
 

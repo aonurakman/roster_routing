@@ -6,18 +6,12 @@ import sys
 import xml.etree.ElementTree as ET
 from typing import Optional
 
-from legacy.scripts.baselines_clusters import ALGORITHM
-
 
 def add_arguments() -> argparse.ArgumentParser:
-    # what is the best way of assigning each of these to a variable?
-    # answer: use the argparse module to parse command line arguments and assign them to variables
-    # show example
-    # example: my_variable = args.my_variable
     parser = argparse.ArgumentParser()
     parser.add_argument('--id', type=str, required=True)
     parser.add_argument('--project', type=str, default=None)
-    parser.add_argument('--env-conf', type=str, default="clusters")
+    parser.add_argument('--env-conf', type=str, default="config1")
     parser.add_argument('--task-conf', type=str, required=True)
     parser.add_argument('--alg-conf', type=str, required=True)
     parser.add_argument('--net', type=str, required=True)
@@ -26,6 +20,7 @@ def add_arguments() -> argparse.ArgumentParser:
     parser.add_argument('--route-set', type=str, default=None)
     parser.add_argument("--shuffle", action="store_true", default=False)
     parser.add_argument('--skip-metrics', action='store_true', default=False)
+    parser.add_argument("--save-model-every", type=int, default=None)
     return parser
     
     
@@ -65,9 +60,9 @@ def get_device(declare: bool = True) -> torch.device:
         print(f"Device: {device}")
     return device
     
-def read_parameters(args: argparse.Namespace) -> dict:
+def read_parameters(args: argparse.Namespace, alg: str) -> dict:
     params = dict()
-    params.update(json.load(open(f"../config/algo_config/{ALGORITHM}/{args.alg_conf}.json")))
+    params.update(json.load(open(f"../config/algo_config/{alg}/{args.alg_conf}.json")))
     params.update(json.load(open(f"../config/env_config/{args.env_conf}.json")))
     params.update(json.load(open(f"../config/task_config/{args.task_conf}.json")))
     return params
@@ -97,13 +92,6 @@ def model_snapshot_path(
         models_folder,
         f"training_ep_{completed_episode:06d}.{extension.lstrip('.')}",
     )
-
-
-def warn_model_snapshots_unsupported(save_model_every: Optional[int]) -> None:
-    """Explain when a script accepts but does not implement policy snapshots."""
-    if save_model_every is not None:
-        print("Warning: --save-model-every is not supported by this script and will be ignored.")
-
 
 class CSVLossLogger:
 
