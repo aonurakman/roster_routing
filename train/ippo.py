@@ -84,13 +84,7 @@ if __name__ == "__main__":
 
     action_masks = None
     route_set_dir = os.path.join(custom_network_folder, "clustered_routes", route_set)
-    clustered_loader = ClusteredRoutesLoader(
-        args.net,
-        custom_network_folder,
-        args.shuffle,
-        args.env_seed,
-        route_set_dir=route_set_dir,
-    )
+    clustered_loader = ClusteredRoutesLoader(args.net, route_set_dir=route_set_dir)
     number_of_paths = clustered_loader.get_number_of_paths()
     clustered_loader.export_paths_routes(records_folder, origins, destinations)
     action_masks = clustered_loader.create_masks(origins, destinations)
@@ -141,7 +135,6 @@ if __name__ == "__main__":
     dump_config["num_agents"] = num_agents
     dump_config["use_clustered_routes"] = use_clustered_routes
     dump_config["use_action_masks"] = action_masks is not None
-    dump_config["shuffle"] = args.shuffle
     dump_config["observation_type"] = observations
     with open(exp_config_path, 'w', encoding='utf-8') as f:
         json.dump(dump_config, f, indent=4)
@@ -205,14 +198,15 @@ if __name__ == "__main__":
     human_by_id = {int(agent.id): agent for agent in env.human_agents}
     traveler_ids = list(human_by_id)
     
-    obs_size = env.get_observation_function().OBS_SIZE
-    shared_model = PPO(
-            obs_size, env.action_space_size,
-            device=device, batch_size=batch_size, lr=lr, num_epochs=num_epochs,
-            num_hidden=num_hidden, widths=widths, clip_eps=clip_eps,
-            normalize_advantage=normalize_advantage, entropy_coef=entropy_coef,
-            action_mask=None
-        )
+    model_config = dict(
+        state_size=env.get_observation_function().OBS_SIZE,
+        action_space_size=env.action_space_size,
+        batch_size=batch_size, lr=lr, num_epochs=num_epochs,
+        num_hidden=num_hidden, widths=widths, clip_eps=clip_eps,
+        normalize_advantage=normalize_advantage, entropy_coef=entropy_coef,
+    )
+    shared_model = PPO(**model_config, device=device)
+    routing_spec = clustered_loader.routing_spec(records_folder, observations)
     
     ### Learning phase ###
     pbar.set_description("AV learning")
@@ -249,10 +243,12 @@ if __name__ == "__main__":
         if episode % plot_every == 0:
             env.plot_results()
             
-        if should_save_model_snapshot(episode+1, training_eps, args.save_model_every):
+        if episode+1 == training_eps or should_save_model_snapshot(episode+1, training_eps, args.save_model_every):
             torch.save(
                 {
                     "training_episode": episode+1,
+                    "model_config": model_config,
+                    "routing_spec": routing_spec,
                     "models": {
                         "policy_net": shared_model.policy_net.state_dict()
                     },
@@ -264,17 +260,7 @@ if __name__ == "__main__":
     # Finalize the experiment
     pbar.close()
     env.plot_results()
-    
-    
-    torch.save(
-        {
-            "training_episode": episode+1,
-            "models": {
-                "policy_net": shared_model.policy_net.state_dict()
-            },
-        },
-        model_snapshot_path(records_folder, episode+1, "pt"),
-    )
+
     loss_records = []
     for agent in env.machine_agents:
         for iteration, loss_value in enumerate(agent.model.loss, start=1):

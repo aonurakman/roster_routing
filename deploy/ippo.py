@@ -11,6 +11,8 @@ import ast
 import json
 import logging
 import random
+from hashlib import sha256
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -33,30 +35,38 @@ if __name__ == "__main__":
     parser = add_arguments()
     args = parser.parse_args()
     ALGORITHM = "ippo"
+    base_dir = os.path.join(repo_root, "results")
+    training_folder = os.path.join(base_dir, args.training_run)
+    with open(os.path.join(training_folder, "exp_config.json"), encoding="utf-8") as f:
+        training_config = json.load(f)
+    checkpoint_path = Path(model_snapshot_path(training_folder, training_config["training_eps"], "pt"))
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(f"Final training checkpoint not found: {checkpoint_path}")
+
+    network = training_config["network"]
+    route_set = resolve_route_set(network, training_config["route_set"])
     configure(args.env_seed, args.torch_seed)
-    declare_setup(args, ALGORITHM)
+    declare_setup(args, ALGORITHM, network, route_set)
     device = get_device()
     params = read_parameters(args, ALGORITHM)
+    params["observations"] = training_config["observation_type"]
 
     for key, value in params.items():
         globals()[key] = value
         
     if not use_clustered_routes:
         raise NotImplementedError("This script requires clustered routes.")
-    route_set = resolve_route_set(args.net, args.route_set)
-    print(f"Route set: {route_set}")
 
-    custom_network_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"../networks/{args.net}")
+    custom_network_folder = os.path.join(repo_root, "networks", network)
     phases = [1, human_learning_episodes]
     phase_names = ["Human stabilization", "Deployment"]
     
-    base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../results")
     records_folder = os.path.join(base_dir, f"{args.id}_deploy")
     plots_folder = os.path.join(base_dir, f"{args.id}/plots")
     mode_choice_save_path = os.path.join(records_folder, "mode_choice/")
     os.makedirs(mode_choice_save_path, exist_ok=True)
 
-    od_file_path = os.path.join(custom_network_folder, f"od_{args.net}.txt")
+    od_file_path = os.path.join(custom_network_folder, f"od_{network}.txt")
     with open(od_file_path, 'r', encoding='utf-8') as f:
         content = f.read()
     data = ast.literal_eval(content)
@@ -86,13 +96,7 @@ if __name__ == "__main__":
 
     action_masks = None
     route_set_dir = os.path.join(custom_network_folder, "clustered_routes", route_set)
-    clustered_loader = ClusteredRoutesLoader(
-        args.net,
-        custom_network_folder,
-        args.shuffle,
-        args.env_seed,
-        route_set_dir=route_set_dir,
-    )
+    clustered_loader = ClusteredRoutesLoader(network, route_set_dir=route_set_dir)
     number_of_paths = clustered_loader.get_number_of_paths()
     clustered_loader.export_paths_routes(records_folder, origins, destinations)
     action_masks = clustered_loader.create_masks(origins, destinations)
@@ -129,9 +133,22 @@ if __name__ == "__main__":
             + ", ".join(map(str, missing_ods))
         )
 
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    if "model_config" not in checkpoint or "routing_spec" not in checkpoint:
+        raise ValueError("Checkpoint is missing model or routing metadata. Use a new IPPO training checkpoint.")
+    if checkpoint["routing_spec"] != clustered_loader.routing_spec(records_folder, observations):
+        raise ValueError("Checkpoint routes, masks, or observation type differ from deployment.")
+
+    model_config = checkpoint["model_config"]
+    shared_model = PPO(**model_config, device=device)
+    shared_model.policy_net.load_state_dict(checkpoint["models"]["policy_net"])
+    shared_model.policy_net.eval()
+    shared_model.policy_net.requires_grad_(False)
+    shared_model.deterministic = args.action_selection == 'argmax'
+
     create_paths_flag = False
     dump_config["number_of_paths"] = number_of_paths
-    dump_config["network"] = args.net
+    dump_config["network"] = network
     dump_config["env_seed"] = args.env_seed
     dump_config["torch_seed"] = args.torch_seed
     dump_config["route_set"] = route_set
@@ -143,8 +160,11 @@ if __name__ == "__main__":
     dump_config["num_agents"] = num_agents
     dump_config["use_clustered_routes"] = use_clustered_routes
     dump_config["use_action_masks"] = action_masks is not None
-    dump_config["shuffle"] = args.shuffle
     dump_config["observation_type"] = observations
+    dump_config["training_run"] = args.training_run
+    dump_config["checkpoint"] = str(checkpoint_path)
+    dump_config["checkpoint_sha256"] = sha256(checkpoint_path.read_bytes()).hexdigest()
+    dump_config["action_selection"] = args.action_selection
     with open(exp_config_path, 'w', encoding='utf-8') as f:
         json.dump(dump_config, f, indent=4)
 
@@ -173,7 +193,7 @@ if __name__ == "__main__":
             "save_every" : save_every,
         },
         simulator_parameters = {
-            "network_name" : args.net,
+            "network_name" : network,
             "custom_network_folder" : custom_network_folder,
             "sumo_type" : "sumo",
             "simulation_timesteps" : max_start_time
@@ -196,6 +216,10 @@ if __name__ == "__main__":
 
     env.start()
     env.reset()
+    if (model_config["state_size"] != env.get_observation_function().OBS_SIZE
+            or model_config["action_space_size"] != env.action_space_size):
+        env.stop_simulation()
+        raise ValueError("Checkpoint observation or action size differs from deployment.")
     print_agent_counts(env)
 
     ### Human learning phase ###
@@ -205,11 +229,6 @@ if __name__ == "__main__":
         pbar.update()
 
     human_by_id = {int(agent.id): agent for agent in env.human_agents}
-    
-    # load saved model
-    shared_model = PPO(...)
-    # make it deterministic for deployment
-    shared_model.eval()
     
     mode_choice_model = dict()
     pref_av = normal(loc=pref_av_mean, scale=pref_av_std, size=num_agents)

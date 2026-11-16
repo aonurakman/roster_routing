@@ -1,4 +1,5 @@
 import os
+from hashlib import sha256
 from pathlib import Path
 
 import pandas as pd
@@ -65,9 +66,6 @@ class ClusteredRoutesLoader:
     def __init__(
         self,
         network_name: str,
-        network_folder: str | Path,
-        shuffle: bool = False,
-        seed: int = 42,
         *,
         route_set_dir: str | Path,
     ):
@@ -76,14 +74,10 @@ class ClusteredRoutesLoader:
         
         Args:
             network_name: Name of the network (e.g., 'saint_arnoult')
-            network_folder: Path to the network folder in URB
-            shuffle: Randomly shuffles the clusters if True
             route_set_dir: Directory containing the generated representatives
                 and action masks.
         """
         self.network_name = network_name
-        self.shuffle = shuffle
-        self.rng = np.random.default_rng(seed)
 
         if route_set_dir is None:
             raise ValueError(
@@ -123,15 +117,6 @@ class ClusteredRoutesLoader:
                 path = str(row.path).split(',')
                 fft = row.free_flow_time
                 routes[int(row.cluster)] = (path, fft)
-
-            if self.shuffle:
-                valid_keys = list(routes.keys()) # non-masked keys, e.g. 0, 3, 4
-                values = list(routes.values()) # corresponding routes and ffts e.g. A, B, C
-                shuffled_values = self.rng.permutation(len(values)) # e.g. 2, 0, 1
-                routes = {
-                    valid_keys[i]: values[shuffled_values[i]]
-                    for i in range(len(valid_keys))
-                } # e.g. 0: C (2), 3: A (0), 4: B (1)
 
             self.routes_by_od[(str(origin), str(dest))] = routes
 
@@ -266,6 +251,16 @@ class ClusteredRoutesLoader:
         # Export route.rou.xml
         rou_xml = os.path.join(records_folder, "route.rou.xml")
         self.export_to_sumo_rou_xml(rou_xml, origins, destinations)
+
+    def routing_spec(self, records_folder, observation_type):
+        paths_csv = Path(records_folder) / "paths.csv"
+        return {
+            "network": self.network_name,
+            "route_set": self.masks_csv_path.parent.name,
+            "observation_type": observation_type,
+            "paths_sha256": sha256(paths_csv.read_bytes()).hexdigest(),
+            "masks_sha256": sha256(self.masks_csv_path.read_bytes()).hexdigest(),
+        }
 
 
 class AVMaskWrapper(BaseWrapper):

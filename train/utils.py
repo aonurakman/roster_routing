@@ -25,7 +25,6 @@ def add_arguments() -> argparse.ArgumentParser:
     parser.add_argument('--env-seed', type=int, default=42)
     parser.add_argument('--torch-seed', type=int, default=42)
     parser.add_argument('--route-set', type=str, default=None)
-    parser.add_argument("--shuffle", action="store_true", default=False)
     parser.add_argument('--skip-metrics', action='store_true', default=False)
     parser.add_argument("--save-model-every", type=int, default=None)
     return parser
@@ -41,7 +40,6 @@ def declare_setup(args: argparse.Namespace, alg: str) -> None:
     print(f"Environment config: {args.env_conf}")
     print(f"Task config: {args.task_conf}")
     print(f"Requested route set: {args.route_set or 'network default'}")
-    print(f"Shuffle: {args.shuffle}")
     print(f"Metrics will {'NOT ' if args.skip_metrics else ''}be computed after the experiment.\n")
     
 

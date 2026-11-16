@@ -21,26 +21,25 @@ def add_arguments() -> argparse.ArgumentParser:
     parser.add_argument('--env-conf', type=str, default="config1")
     parser.add_argument('--task-conf', type=str, required=True)
     parser.add_argument('--alg-conf', type=str, required=True)
-    parser.add_argument('--net', type=str, required=True)
     parser.add_argument('--env-seed', type=int, default=42)
     parser.add_argument('--torch-seed', type=int, default=42)
-    parser.add_argument('--route-set', type=str, default=None)
-    parser.add_argument("--shuffle", action="store_true", default=False)
     parser.add_argument('--skip-metrics', action='store_true', default=False)
+    parser.add_argument('--training-run', type=str, required=True, help='Training run folder under results')
+    parser.add_argument('--action-selection', choices=['sample', 'argmax'], required=True)
     return parser
     
     
-def declare_setup(args: argparse.Namespace, alg: str) -> None:
+def declare_setup(args: argparse.Namespace, alg: str, network: str, route_set: str) -> None:
     print("### STARTING EXPERIMENT ###")
     print(f"Algorithm: {alg.upper()}")
     print(f"Experiment ID: {args.id}")
-    print(f"Network: {args.net}")
+    print(f"Training run: {args.training_run}")
+    print(f"Network: {network}")
     print(f"Environment seed: {args.env_seed}")
     print(f"Algorithm config: {args.alg_conf}")
     print(f"Environment config: {args.env_conf}")
     print(f"Task config: {args.task_conf}")
-    print(f"Requested route set: {args.route_set or 'network default'}")
-    print(f"Shuffle: {args.shuffle}")
+    print(f"Route set: {route_set}")
     print(f"Metrics will {'NOT ' if args.skip_metrics else ''}be computed after the experiment.\n")
     
 
@@ -84,10 +83,8 @@ def model_snapshot_path(
     extension: str,
 ) -> str:
     """Return a standard path for one whole-population policy snapshot."""
-    models_folder = os.path.join(records_folder, "models")
-    os.makedirs(models_folder, exist_ok=True)
     return os.path.join(
-        models_folder,
+        records_folder, "models",
         f"training_ep_{completed_episode:06d}.{extension.lstrip('.')}",
     )
 
