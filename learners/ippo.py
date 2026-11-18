@@ -1,4 +1,3 @@
-import random
 import numpy as np
 import torch
 
@@ -79,7 +78,7 @@ class PPO:
         state, action, log_prob, mask = self.pending.pop(int(agent_id))
         self.memory.append((state, action, log_prob, reward, mask))
 
-    def learn(self):
+    def learn(self, batch_rng):
         if not self.memory: return
 
         states, actions, old_log_probs, rewards, masks = zip(*self.memory)
@@ -97,7 +96,7 @@ class PPO:
         step_loss = list()
 
         for _ in range(self.num_epochs):
-            random.shuffle(indices)
+            batch_rng.shuffle(indices)
             shuffled = torch.tensor(indices, device=self.device)
             for batch in shuffled.split(self.batch_size):
                 dist = self._distribution(states_tensor[batch], masks_tensor[batch])

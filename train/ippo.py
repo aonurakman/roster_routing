@@ -211,10 +211,15 @@ if __name__ == "__main__":
     env.human_learning = humans_adapt_during_pretraining
     pbar.set_description("AV learning")
     os.makedirs(plots_folder, exist_ok=True)
+
+    seed_rng = random.Random(args.env_seed)
+    fleet_rng = random.Random(seed_rng.getrandbits(64))
+    batch_rng = random.Random(seed_rng.getrandbits(64))
+
     for episode in range(training_eps):
-        num_agents_to_switch = random.randint(0, len(traveler_ids))
+        num_agents_to_switch = fleet_rng.randint(0, len(traveler_ids))
         num_agents_to_switch = (num_agents_to_switch // granularity) * granularity
-        av_ids = set(random.sample(traveler_ids, num_agents_to_switch))
+        av_ids = set(fleet_rng.sample(traveler_ids, num_agents_to_switch))
         set_daily_population(env, human_by_id, av_ids)
         env.reset()
 
@@ -239,7 +244,7 @@ if __name__ == "__main__":
             
         completed_days = episode + 1
         if completed_days % update_every == 0 or completed_days == training_eps:
-            shared_model.learn()
+            shared_model.learn(batch_rng)
             
         if episode % plot_every == 0:
             env.plot_results()
