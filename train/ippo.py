@@ -237,23 +237,24 @@ if __name__ == "__main__":
 
         assert not shared_model.pending, "Some AV actions did not receive rewards"
             
-        if episode % update_every == 0:
+        completed_days = episode + 1
+        if completed_days % update_every == 0 or completed_days == training_eps:
             shared_model.learn()
             
         if episode % plot_every == 0:
             env.plot_results()
             
-        if episode+1 == training_eps or should_save_model_snapshot(episode+1, training_eps, args.save_model_every):
+        if completed_days == training_eps or should_save_model_snapshot(completed_days, training_eps, args.save_model_every):
             torch.save(
                 {
-                    "training_episode": episode+1,
+                    "training_episode": completed_days,
                     "model_config": model_config,
                     "routing_spec": routing_spec,
                     "models": {
                         "policy_net": shared_model.policy_net.state_dict()
                     },
                 },
-                model_snapshot_path(records_folder, episode+1, "pt"),
+                model_snapshot_path(records_folder, completed_days, "pt"),
             )
         pbar.update()
     

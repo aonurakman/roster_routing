@@ -80,34 +80,41 @@ class PPO:
         self.memory.append((state, action, log_prob, reward, mask))
 
     def learn(self):
-        if len(self.memory) < self.batch_size: return
+        if not self.memory: return
+
+        states, actions, old_log_probs, rewards, masks = zip(*self.memory)
+        states_tensor = torch.FloatTensor(np.stack(states)).to(self.device)
+        actions_tensor = torch.LongTensor(actions).to(self.device)
+        old_log_probs_tensor = torch.FloatTensor(old_log_probs).to(self.device)
+        rewards_tensor = torch.FloatTensor(rewards).to(self.device)
+        masks_tensor = torch.as_tensor(np.stack(masks), dtype=torch.bool, device=self.device)
+
+        advantages = rewards_tensor
+        if self.normalize_advantage:
+            advantages = (rewards_tensor - rewards_tensor.mean()) / (rewards_tensor.std(unbiased=False) + 1e-8)
+
+        indices = list(range(len(self.memory)))
         step_loss = list()
 
         for _ in range(self.num_epochs):
-            batch = random.sample(self.memory, self.batch_size)
-            states, actions, old_log_probs, rewards, masks = zip(*batch)
-            states_tensor = torch.FloatTensor(np.stack(states)).to(self.device)
-            actions_tensor = torch.LongTensor(actions).to(self.device)
-            old_log_probs_tensor = torch.FloatTensor(old_log_probs).to(self.device)
-            rewards_tensor = torch.FloatTensor(rewards).to(self.device)
+            random.shuffle(indices)
+            shuffled = torch.tensor(indices, device=self.device)
+            for batch in shuffled.split(self.batch_size):
+                dist = self._distribution(states_tensor[batch], masks_tensor[batch])
+                new_log_probs = dist.log_prob(actions_tensor[batch])
+                ratio = torch.exp(new_log_probs - old_log_probs_tensor[batch])
+                advantage = advantages[batch]
 
-            dist = self._distribution(states_tensor, np.stack(masks))
-            new_log_probs = dist.log_prob(actions_tensor)
+                surr1 = ratio * advantage
+                surr2 = torch.clamp(ratio, 1 - self.clip_eps, 1 + self.clip_eps) * advantage
+                entropy = dist.entropy().mean()
+                loss = -torch.min(surr1, surr2).mean() - self.entropy_coef * entropy
 
-            ratio = torch.exp(new_log_probs - old_log_probs_tensor)
-            if self.normalize_advantage: advantage = (rewards_tensor - rewards_tensor.mean()) / (rewards_tensor.std() + 1e-8)
-            else: advantage = rewards_tensor
-
-            surr1 = ratio * advantage
-            surr2 = torch.clamp(ratio, 1 - self.clip_eps, 1 + self.clip_eps) * advantage
-            entropy = dist.entropy().mean()
-            loss = -torch.min(surr1, surr2).mean() - self.entropy_coef * entropy
-
-            self.optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=1.0)
-            self.optimizer.step()
-            step_loss.append(loss.item())
+                self.optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=1.0)
+                self.optimizer.step()
+                step_loss.append(loss.item())
 
         self.loss.append(sum(step_loss) / len(step_loss))
         self.memory.clear()
