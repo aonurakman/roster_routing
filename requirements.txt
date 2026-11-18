@@ -1,4 +1,4 @@
-routerl-nightly
+routerl @ git+https://github.com/COeXISTENCE-PROJECT/RouteRL.git@rosters
 janux==1.1.0
 matplotlib>=3.9.3
 numpy>=2.0.2
