@@ -200,7 +200,7 @@ if __name__ == "__main__":
     model_config = dict(
         state_size=env.get_observation_function().OBS_SIZE,
         action_space_size=env.action_space_size,
-        batch_size=batch_size, lr=lr, num_epochs=num_epochs,
+        batch_size=batch_size, lr=lr, value_lr=value_lr, num_epochs=num_epochs,
         num_hidden=num_hidden, widths=widths, clip_eps=clip_eps,
         normalize_advantage=normalize_advantage, entropy_coef=entropy_coef,
     )
@@ -256,7 +256,8 @@ if __name__ == "__main__":
                     "model_config": model_config,
                     "routing_spec": routing_spec,
                     "models": {
-                        "policy_net": shared_model.policy_net.state_dict()
+                        "policy_net": shared_model.policy_net.state_dict(),
+                        "value_net": shared_model.value_net.state_dict(),
                     },
                 },
                 model_snapshot_path(records_folder, completed_days, "pt"),

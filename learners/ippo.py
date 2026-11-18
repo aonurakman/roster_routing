@@ -10,7 +10,7 @@ class PPO:
                  device="cpu", batch_size=16, lr=0.003, num_epochs=4,
                  num_hidden=2, widths=[32, 64, 32], clip_eps=0.2,
                  normalize_advantage=True, entropy_coef=0.3,
-                 action_mask=None):
+                 action_mask=None, value_lr=0.003):
         super().__init__()
         self.device = device
         self.action_space_size = action_space_size
@@ -22,6 +22,10 @@ class PPO:
 
         self.policy_net = Network(state_size, action_space_size, num_hidden, widths).to(self.device)
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
+
+        with torch.random.fork_rng(devices=[]):
+            self.value_net = Network(state_size, 1, num_hidden, widths).to(self.device)
+        self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=value_lr)
         
         self.loss = list()
         self.memory = list()
@@ -86,9 +90,11 @@ class PPO:
         rewards_tensor = torch.FloatTensor(rewards).to(self.device)
         masks_tensor = torch.as_tensor(np.stack(masks), dtype=torch.bool, device=self.device)
 
-        advantages = rewards_tensor
+        with torch.no_grad():
+            old_values = self.value_net(states_tensor).squeeze(-1)
+        advantages = rewards_tensor - old_values
         if self.normalize_advantage:
-            advantages = (rewards_tensor - rewards_tensor.mean()) / (rewards_tensor.std(unbiased=False) + 1e-8)
+            advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
 
         indices = list(range(len(self.memory)))
         step_loss = list()
@@ -97,7 +103,8 @@ class PPO:
             batch_rng.shuffle(indices)
             shuffled = torch.tensor(indices, device=self.device)
             for batch in shuffled.split(self.batch_size):
-                dist = self._distribution(states_tensor[batch], masks_tensor[batch])
+                batch_states = states_tensor[batch]
+                dist = self._distribution(batch_states, masks_tensor[batch])
                 new_log_probs = dist.log_prob(actions_tensor[batch])
                 ratio = torch.exp(new_log_probs - old_log_probs_tensor[batch])
                 advantage = advantages[batch]
@@ -112,6 +119,12 @@ class PPO:
                 torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=1.0)
                 self.optimizer.step()
                 step_loss.append(loss.item())
+
+                values = self.value_net(batch_states).squeeze(-1)
+                value_loss = 0.5 * (values - rewards_tensor[batch]).square().mean()
+                self.value_optimizer.zero_grad()
+                value_loss.backward()
+                self.value_optimizer.step()
 
         self.loss.append(sum(step_loss) / len(step_loss))
         self.memory.clear()
