@@ -2,7 +2,6 @@ import numpy as np
 import torch
 
 from torch import optim
-from torch import nn
 
 from .common import Network
 
@@ -23,7 +22,6 @@ class PPO:
 
         self.policy_net = Network(state_size, action_space_size, num_hidden, widths).to(self.device)
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
-        self.softmax = nn.Softmax(dim=-1)
         
         self.loss = list()
         self.memory = list()
@@ -48,7 +46,7 @@ class PPO:
                 device=self.device,
             )
             logits = logits.masked_fill(~mask_tensor, float("-inf"))
-        return torch.distributions.Categorical(probs=self.softmax(logits))
+        return torch.distributions.Categorical(logits=logits)
 
     def act(self, state, agent_id, mask=None, record=True):
         if mask is None:
